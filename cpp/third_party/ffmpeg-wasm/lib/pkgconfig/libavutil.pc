@@ -5,7 +5,7 @@ includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-was
 
 Name: libavutil
 Description: FFmpeg utility library
-Version: 59.39.100
+Version: 60.26.100
 Requires: 
 Requires.private: 
 Conflicts:

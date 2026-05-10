@@ -5,8 +5,8 @@ includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-was
 
 Name: libswresample
 Description: FFmpeg audio resampling library
-Version: 5.3.100
-Requires: libavutil >= 59.39.100
+Version: 6.3.100
+Requires: libavutil >= 60.26.100
 Requires.private: 
 Conflicts:
 Libs: -L${libdir}  -lswresample -lm

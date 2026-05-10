@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FFMPEG_OUT_DIR="${ROOT_DIR}/third_party/ffmpeg-wasm"
-FFMPEG_VERSION="7.1"
+FFMPEG_VERSION="8.1"
 BUILD_DIR="${ROOT_DIR}/build_ffmpeg"
 FFMPEG_SRC_DIR="${ROOT_DIR}/ffmpeg-${FFMPEG_VERSION}"
 
@@ -55,7 +55,6 @@ emconfigure ./configure \
   --disable-network \
   --disable-avdevice \
   --disable-avfilter \
-  --disable-postproc \
   --disable-hwaccels \
   --disable-iconv \
   --disable-zlib \

@@ -5,8 +5,8 @@ includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-was
 
 Name: libswscale
 Description: FFmpeg image rescaling library
-Version: 8.3.100
-Requires: libavutil >= 59.39.100
+Version: 9.5.100
+Requires: libavutil >= 60.26.100
 Requires.private: 
 Conflicts:
 Libs: -L${libdir}  -lswscale -lm
