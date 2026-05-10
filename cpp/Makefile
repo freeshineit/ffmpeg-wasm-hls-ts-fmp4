@@ -8,6 +8,7 @@ BUILD_DATE_UTC := $(shell date -u +%Y-%m-%d)
 BANNER_TEXT := /*! hls-wasm2 player_wasm | ffmpeg $(FFMPEG_VERSION) | build-date $(BUILD_DATE_UTC) */
 OUT_JS := $(BUILD_DIR)/player_wasm.js
 OUT_WASM := $(BUILD_DIR)/player_wasm.wasm
+WASM_OPT := $(shell command -v wasm-opt 2>/dev/null)
 
 CXX := em++
 CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables
@@ -50,6 +51,10 @@ wasm: $(OUT_JS)
 $(OUT_JS): $(ROOT_DIR)/src/player_wasm.cpp $(ROOT_DIR)/include/player_wasm.h
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ROOT_DIR)/src/player_wasm.cpp -o $(OUT_JS) $(LIBS) $(EM_FLAGS)
+	@if [ -n "$(WASM_OPT)" ]; then \
+		echo "Running wasm-opt -Oz on $(OUT_WASM)"; \
+		$(WASM_OPT) -Oz --all-features $(OUT_WASM) -o $(OUT_WASM); \
+	fi
 	@{ \
 		echo "$(BANNER_TEXT)"; \
 		cat "$(OUT_JS)"; \

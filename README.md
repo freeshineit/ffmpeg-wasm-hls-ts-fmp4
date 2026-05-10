@@ -6,7 +6,7 @@
 
 - C++ + FFmpeg 编译到 WASM。
 - HLS 媒体分片支持：TS、fMP4。
-- 视频编码支持：H264/AVC、H265/HEVC。
+- 视频编码支持：H265/HEVC（不包含 H264/AVC）。
 - 音频编码支持：AAC。
 - 视频输出：WebGL（YUV420P 着色显示）。
 - 音频输出：AudioContext（Float32 PCM 调度播放）。

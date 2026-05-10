@@ -43,10 +43,24 @@ emconfigure ./configure \
   --ar=emar \
   --ranlib=emranlib \
   --target-os=none \
-  --arch=x86_64 \
+  --arch=wasm32 \
   --enable-cross-compile \
   --disable-x86asm \
   --disable-inline-asm \
+  --disable-mmx \
+  --disable-mmxext \
+  --disable-sse \
+  --disable-sse2 \
+  --disable-sse3 \
+  --disable-ssse3 \
+  --disable-sse4 \
+  --disable-sse42 \
+  --disable-avx \
+  --disable-avx2 \
+  --disable-avx512 \
+  --disable-fma3 \
+  --disable-fma4 \
+  --disable-xop \
   --disable-autodetect \
   --disable-pthreads \
   --disable-runtime-cpudetect \
@@ -70,13 +84,10 @@ emconfigure ./configure \
   --enable-protocol=file \
   --enable-demuxer=mov \
   --enable-demuxer=mpegts \
-  --enable-parser=h264 \
   --enable-parser=hevc \
-  --enable-decoder=h264 \
   --enable-decoder=hevc \
   --enable-decoder=aac \
   --enable-bsf=hevc_mp4toannexb \
-  --enable-bsf=h264_mp4toannexb \
   --enable-bsf=extract_extradata \
   --enable-swresample \
   --enable-swscale \
