@@ -34,13 +34,17 @@ export class HlsWasmPlayer {
 
     this.lastAudioRawPtsMs = null;
     this.lastAudioNormPtsMs = null;
+
+    this.segmentSeq = 0;
+    this.segmentInfoQueue = [];
+    this.maxPendingSegmentInfo = 60;
   }
 
   async init() {
     await this.audio.init();
 
     await this.wasm.init({
-      onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs) => {
+      onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, codecName) => {
         const ySize = yStride * height;
         const uvHeight = height >> 1;
         const uSize = uStride * uvHeight;
@@ -62,12 +66,16 @@ export class HlsWasmPlayer {
           vStride,
           ptsMs: normalizedPtsMs,
         });
+
+        this.#logSegmentVideoInfo(width, height, yStride, uStride, vStride, normalizedPtsMs, codecName);
       },
-      onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs) => {
+      onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs, codecName) => {
         const sampleNum = channels * sampleCount;
         const pcm = new Float32Array(this.wasm.module.HEAPU8.buffer, dataPtr, sampleNum).slice();
         const normalizedPtsMs = this.#normalizeAudioPts(ptsMs, sampleCount, sampleRate);
         this.audio.enqueueFrame({ channels, sampleRate, sampleCount, pcm, ptsMs: normalizedPtsMs });
+
+        this.#logSegmentAudioInfo(channels, sampleRate, sampleCount, normalizedPtsMs, codecName);
       },
       onLog: (level, msg) => {
         this.log(`[wasm:${level}] ${msg}`);
@@ -90,6 +98,7 @@ export class HlsWasmPlayer {
     this.videoFrameDurMs = 33.33;
     this.lastAudioRawPtsMs = null;
     this.lastAudioNormPtsMs = null;
+    this.segmentInfoQueue.length = 0;
     this.#startRenderLoop();
 
     this.hls = new HlsController({
@@ -97,6 +106,9 @@ export class HlsWasmPlayer {
       lowLatency: true,
       onSegment: async (bytes, isInitSegment, segmentUrl) => {
         await this.#waitForFlowControl();
+        if (!isInitSegment) {
+          this.#beginSegmentInfo(segmentUrl, bytes.length);
+        }
         this.wasm.feedSegment(bytes, isInitSegment);
         this.log(`${isInitSegment ? "init" : "seg"}: ${segmentUrl}`);
       },
@@ -128,6 +140,8 @@ export class HlsWasmPlayer {
     this.videoFrameDurMs = 33.33;
     this.lastAudioRawPtsMs = null;
     this.lastAudioNormPtsMs = null;
+    this.#flushPendingSegmentInfos();
+    this.segmentInfoQueue.length = 0;
 
     this.wasm.reset();
     this.audio.reset();
@@ -267,5 +281,114 @@ export class HlsWasmPlayer {
     }
     this.lastAudioNormPtsMs += Math.max(5, stepMs);
     return this.lastAudioNormPtsMs;
+  }
+
+  #beginSegmentInfo(segmentUrl, byteLength) {
+    this.#flushHeadSegmentInfo();
+
+    this.segmentInfoQueue.push({
+      id: ++this.segmentSeq,
+      segmentUrl,
+      byteLength,
+      videoInfo: null,
+      audioInfo: null,
+      printed: false,
+    });
+
+    while (this.segmentInfoQueue.length > this.maxPendingSegmentInfo) {
+      const stale = this.segmentInfoQueue.shift();
+      this.#flushSegmentInfo(stale, true);
+    }
+  }
+
+  #logSegmentVideoInfo(width, height, yStride, uStride, vStride, ptsMs, codecName) {
+    const ctx = this.segmentInfoQueue.find((item) => !item.videoInfo);
+    if (!ctx) {
+      return;
+    }
+
+    ctx.videoInfo = {
+      width,
+      height,
+      yStride,
+      uStride,
+      vStride,
+      ptsMs,
+      codecName: codecName || "unknown",
+    };
+    this.#flushSegmentInfo(ctx, false);
+  }
+
+  #logSegmentAudioInfo(channels, sampleRate, sampleCount, ptsMs, codecName) {
+    const ctx = this.segmentInfoQueue.find((item) => !item.audioInfo);
+    if (!ctx) {
+      return;
+    }
+
+    ctx.audioInfo = {
+      channels,
+      sampleRate,
+      sampleCount,
+      ptsMs,
+      codecName: codecName || "unknown",
+    };
+    this.#flushSegmentInfo(ctx, false);
+  }
+
+  #flushSegmentInfo(ctx, force = false) {
+    if (!ctx || ctx.printed) {
+      return;
+    }
+
+    if (!force && (!ctx.videoInfo || !ctx.audioInfo)) {
+      return;
+    }
+
+    const videoText = ctx.videoInfo
+      ? `videoInfo(codec=${ctx.videoInfo.codecName} width=${ctx.videoInfo.width} height=${ctx.videoInfo.height} y=${ctx.videoInfo.yStride} u=${ctx.videoInfo.uStride} v=${ctx.videoInfo.vStride} pts=${ctx.videoInfo.ptsMs.toFixed(2)}ms)`
+      : "videoInfo(n/a)";
+    const audioText = ctx.audioInfo
+      ? `audioInfo(codec=${ctx.audioInfo.codecName} channels=${ctx.audioInfo.channels} sampleRate=${ctx.audioInfo.sampleRate} samples=${ctx.audioInfo.sampleCount} pts=${ctx.audioInfo.ptsMs.toFixed(2)}ms)`
+      : "audioInfo(n/a)";
+
+    this.log(
+      `[seg-info] #${ctx.id} ${this.#shortSegmentName(ctx.segmentUrl)} size=${ctx.byteLength}B ${videoText} ${audioText}`,
+    );
+
+    ctx.printed = true;
+    this.#compactSegmentInfoQueue();
+  }
+
+  #flushHeadSegmentInfo() {
+    if (this.segmentInfoQueue.length === 0) {
+      return;
+    }
+    this.#flushSegmentInfo(this.segmentInfoQueue[0], true);
+  }
+
+  #flushPendingSegmentInfos() {
+    for (const item of this.segmentInfoQueue) {
+      this.#flushSegmentInfo(item, true);
+    }
+  }
+
+  #compactSegmentInfoQueue() {
+    while (this.segmentInfoQueue.length > 0) {
+      const head = this.segmentInfoQueue[0];
+      if (!head.printed) {
+        break;
+      }
+      this.segmentInfoQueue.shift();
+    }
+  }
+
+  #shortSegmentName(segmentUrl) {
+    try {
+      const url = new URL(segmentUrl);
+      const parts = url.pathname.split("/");
+      return parts[parts.length - 1] || segmentUrl;
+    } catch {
+      return segmentUrl;
+    }
   }
 }

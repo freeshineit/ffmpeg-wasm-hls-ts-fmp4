@@ -7,7 +7,7 @@
 - C++ + FFmpeg 编译到 WASM。
 - HLS 媒体分片支持：TS、fMP4。
 - 视频编码支持：H264/AVC、H265/HEVC。
-- 音频编码支持：AAC、G711A(PCMA)、G711U(PCMU)。
+- 音频编码支持：AAC。
 - 视频输出：WebGL（YUV420P 着色显示）。
 - 音频输出：AudioContext（Float32 PCM 调度播放）。
 - 播放模式：直播、回放；支持 LL-HLS 关键标签（PART、PRELOAD-HINT）。
@@ -84,7 +84,7 @@ npm run dev
 - 对每个分片创建内存输入流（`AVIOContext`），由 FFmpeg 自动识别 TS/fMP4。
 - 自动寻找视频/音频流并打开解码器：
   - 视频：`h264` / `hevc`
-  - 音频：`aac` / `pcm_alaw` / `pcm_mulaw`
+  - 音频：`aac`
 - 视频统一转 `YUV420P` 后回调 JS。
 - 音频统一转换为 `Float32` PCM 后回调 JS。
 

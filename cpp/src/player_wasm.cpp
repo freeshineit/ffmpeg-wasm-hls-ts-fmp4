@@ -32,18 +32,19 @@ EM_JS(void, js_on_video_frame,
        int u_stride,
        int v_ptr,
        int v_stride,
-       double pts_ms),
+       double pts_ms,
+       const char* codec_name),
       {
         if (Module.onVideoFrame) {
-          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms);
+          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms, UTF8ToString(codec_name));
         }
       });
 
 EM_JS(void, js_on_audio_frame,
-      (int channels, int sample_rate, int sample_count, int data_ptr, double pts_ms),
+      (int channels, int sample_rate, int sample_count, int data_ptr, double pts_ms, const char* codec_name),
       {
         if (Module.onAudioFrame) {
-          Module.onAudioFrame(channels, sample_rate, sample_count, data_ptr, pts_ms);
+          Module.onAudioFrame(channels, sample_rate, sample_count, data_ptr, pts_ms, UTF8ToString(codec_name));
         }
       });
 
@@ -389,7 +390,8 @@ class Player {
                       video_frame_yuv_->linesize[1],
                       reinterpret_cast<intptr_t>(video_frame_yuv_->data[2]),
                       video_frame_yuv_->linesize[2],
-                      pts_ms);
+                      pts_ms,
+                      video_dec_ctx_->codec && video_dec_ctx_->codec->name ? video_dec_ctx_->codec->name : "unknown");
   }
 
   void outputAudioFrame(AVFrame* src, double pts_ms) {
@@ -423,7 +425,8 @@ class Player {
                       audio_dec_ctx_->sample_rate,
                       converted,
                       reinterpret_cast<intptr_t>(audio_f32_.data()),
-                      pts_ms);
+                      pts_ms,
+                      audio_dec_ctx_->codec && audio_dec_ctx_->codec->name ? audio_dec_ctx_->codec->name : "unknown");
   }
 
   void cleanupInput(AVFormatContext* fmt) {

@@ -10,7 +10,7 @@ OUT_JS := $(BUILD_DIR)/player_wasm.js
 OUT_WASM := $(BUILD_DIR)/player_wasm.wasm
 
 CXX := em++
-CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti
+CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables
 INCLUDES := -I$(ROOT_DIR)/include -I$(FFMPEG_PREFIX)/include
 LIBS := -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lavutil -lswresample -lswscale
 
@@ -31,6 +31,7 @@ EM_FLAGS := \
 	-sSTACK_OVERFLOW_CHECK=0 \
 	-sDEMANGLE_SUPPORT=0 \
 	-sSUPPORT_ERRNO=0 \
+	-sDYNAMIC_EXECUTION=0 \
 	-sMALLOC=emmalloc \
 	-sINCOMING_MODULE_JS_API="['locateFile']" \
 	-sEXPORTED_FUNCTIONS="['_malloc','_free','_player_create','_player_destroy','_player_feed_segment','_player_reset']" \

@@ -53,6 +53,9 @@ emconfigure ./configure \
   --disable-programs \
   --disable-doc \
   --disable-network \
+  --disable-avdevice \
+  --disable-avfilter \
+  --disable-postproc \
   --disable-hwaccels \
   --disable-iconv \
   --disable-zlib \
@@ -73,8 +76,9 @@ emconfigure ./configure \
   --enable-decoder=h264 \
   --enable-decoder=hevc \
   --enable-decoder=aac \
-  --enable-decoder=pcm_alaw \
-  --enable-decoder=pcm_mulaw \
+  --enable-bsf=hevc_mp4toannexb \
+  --enable-bsf=h264_mp4toannexb \
+  --enable-bsf=extract_extradata \
   --enable-swresample \
   --enable-swscale \
   --extra-cflags="-Oz -ffunction-sections -fdata-sections" \
