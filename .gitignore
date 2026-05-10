@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnpm-store
+
+# Build outputs
+dist/
+build/
+docs/
+ffmpeg-7.1/
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+.dumi
+.dumi/tmp
+.dumi/tmp-production
+.rollup.cache
+rollup.config-*.cjs
+packages/docs
+
+build
+dist
+
+# Temp files
+*.tmp
+.cache
+
+# Playwright
+playwright-report
+test-results
+test-results.json

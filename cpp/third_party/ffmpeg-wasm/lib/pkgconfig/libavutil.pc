@@ -1,0 +1,14 @@
+prefix=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm
+exec_prefix=${prefix}
+libdir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/lib
+includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -lm
+Libs.private: 
+Cflags: -I${includedir}

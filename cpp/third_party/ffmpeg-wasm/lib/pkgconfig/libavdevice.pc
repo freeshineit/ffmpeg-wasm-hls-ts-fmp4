@@ -1,0 +1,14 @@
+prefix=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm
+exec_prefix=${prefix}
+libdir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/lib
+includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/include
+
+Name: libavdevice
+Description: FFmpeg device handling library
+Version: 61.3.100
+Requires: libavformat >= 61.7.100, libavcodec >= 61.19.100, libavutil >= 59.39.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavdevice -lm
+Libs.private: 
+Cflags: -I${includedir}

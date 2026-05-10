@@ -1,0 +1,14 @@
+prefix=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm
+exec_prefix=${prefix}
+libdir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/lib
+includedir=/Users/sankong/Project/FE/github/hls-wasm2/cpp/third_party/ffmpeg-wasm/include
+
+Name: libavfilter
+Description: FFmpeg audio/video filtering library
+Version: 10.4.100
+Requires: libavutil >= 59.39.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavfilter -lm
+Libs.private: 
+Cflags: -I${includedir}
