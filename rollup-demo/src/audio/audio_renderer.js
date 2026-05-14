@@ -4,17 +4,63 @@ export class AudioRenderer {
     this.startedAt = 0;
     this.nextPlayTime = 0;
     this.mediaOffsetSec = null;
+    this._keepAliveOsc = null;
+    this._keepAliveGain = null;
+    this._unlockBound = null;
   }
 
   async init() {
-    if (!this.audioContext) {
-      this.audioContext = new AudioContext({ latencyHint: "interactive" });
-      this.startedAt = this.audioContext.currentTime;
-      this.nextPlayTime = this.startedAt;
+    if (this.audioContext) {
+      return this._tryResume();
     }
+
+    this.audioContext = new AudioContext({ latencyHint: "interactive" });
+    this.startedAt = this.audioContext.currentTime;
+    this.nextPlayTime = this.startedAt;
+
+    // Silent oscillator keeps the Web Audio graph active,
+    // preventing iOS from suspending the AudioContext.
+    this._startKeepAlive();
+
+    // If iOS suspends the context (e.g. app background), auto-resume.
+    this.audioContext.addEventListener("statechange", () => {
+      console.warn("1111", this.audioContext && this.audioContext.state);
+      if (this.audioContext && this.audioContext.state === "suspended") {
+        this.audioContext.resume();
+      }
+    });
+
+    // iOS requires a user gesture to start AudioContext.
+    // Register a one-shot unlock on the first user interaction.
+    this._unlockBound = () => this._tryResume();
+    document.addEventListener("pointerdown", this._unlockBound, { once: true });
+    document.addEventListener("touchend", this._unlockBound, { once: true });
+
+    return this._tryResume();
+  }
+
+  async _tryResume() {
+    if (!this.audioContext) return;
     if (this.audioContext.state !== "running") {
-      this.audioContext.resume();
+      try {
+        await this.audioContext.resume();
+      } catch (_) {
+        // Resuming without a user gesture may be rejected on iOS.
+        // The unlock handler will retry on first interaction.
+      }
     }
+  }
+
+  /** Silent oscillator → gain=0 → destination. Keeps AudioContext running. */
+  _startKeepAlive() {
+    if (!this.audioContext) return;
+    this._keepAliveOsc = this.audioContext.createOscillator();
+    this._keepAliveGain = this.audioContext.createGain();
+    this._keepAliveGain.gain.value = 0;
+    this._keepAliveOsc.connect(this._keepAliveGain);
+    this._keepAliveGain.connect(this.audioContext.destination);
+    this._keepAliveOsc.frequency.value = 440;
+    this._keepAliveOsc.start();
   }
 
   enqueueFrame(frame) {
@@ -68,5 +114,30 @@ export class AudioRenderer {
   reset() {
     this.nextPlayTime = this.audioContext ? this.audioContext.currentTime : 0;
     this.mediaOffsetSec = null;
+  }
+
+  destroy() {
+    if (this._keepAliveOsc) {
+      try {
+        this._keepAliveOsc.stop();
+      } catch (_) {
+        /* already stopped */
+      }
+      this._keepAliveOsc.disconnect();
+      this._keepAliveOsc = null;
+    }
+    if (this._keepAliveGain) {
+      this._keepAliveGain.disconnect();
+      this._keepAliveGain = null;
+    }
+    if (this._unlockBound) {
+      document.removeEventListener("pointerdown", this._unlockBound);
+      document.removeEventListener("touchend", this._unlockBound);
+      this._unlockBound = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
   }
 }

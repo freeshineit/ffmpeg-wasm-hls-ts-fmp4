@@ -23,7 +23,7 @@ export class HlsWasmPlayer {
 
     this.maxVideoQueueSize = 600;
     this.videoQueueHighWatermark = 300;
-    this.maxAudioBufferedSec = 1.8;
+    this.maxAudioBufferedSec = 3.0;
     this.maxVideoLeadSec = 1.2;
     this.dropLateFrameSec = 0.2;
 

@@ -23,7 +23,11 @@ export class AudioRenderer {
     }
 
     const { channels, sampleRate, sampleCount, pcm, ptsMs } = frame;
-    const audioBuffer = this.audioContext.createBuffer(channels, sampleCount, sampleRate);
+    const audioBuffer = this.audioContext.createBuffer(
+      channels,
+      sampleCount,
+      sampleRate,
+    );
 
     for (let ch = 0; ch < channels; ch += 1) {
       const channelData = audioBuffer.getChannelData(ch);
@@ -37,7 +41,7 @@ export class AudioRenderer {
     source.connect(this.audioContext.destination);
 
     const now = this.audioContext.currentTime;
-    const startAt = Math.max(this.nextPlayTime, now + 0.02);
+    const startAt = Math.max(this.nextPlayTime, now);
 
     if (this.mediaOffsetSec === null && Number.isFinite(ptsMs)) {
       this.mediaOffsetSec = ptsMs / 1000 - startAt;

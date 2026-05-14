@@ -76,7 +76,7 @@
             src="./silence.wav"
             loop
             autoplay
-            volume="0"
+            volume="0.1"
             style="display: none"
             id="__audio__"
         ></audio>
@@ -84,6 +84,7 @@
         <script>
             const $audio = document.getElementById("__audio__");
             document.addEventListener("click", () => {
+                console.log("$audio.play", $audio);
                 $audio.play();
             });
         </script>

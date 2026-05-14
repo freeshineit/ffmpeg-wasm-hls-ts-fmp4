@@ -40,9 +40,9 @@ function copyAssets() {
         resolve(wasmDir, "player_wasm.wasm"),
       );
 
-      const silenceSrc = resolve(__dirname, "public", "silence.wav");
-      if (existsSync(silenceSrc)) {
-        copyFileSync(silenceSrc, resolve(dist, "silence.wav"));
+      const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");
+      if (existsSync(toneSrc)) {
+        copyFileSync(toneSrc, resolve(dist, "tone_440hz_1s.wav"));
       }
 
       console.log("[copy-assets] static assets copied to dist/");

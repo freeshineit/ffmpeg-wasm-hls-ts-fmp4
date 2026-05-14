@@ -11,12 +11,27 @@ export class HlsController {
     this.playlistUrl = "";
     this.seen = new Set();
     this.initLoaded = false;
+
+    this._sleepTimer = null;
+    this._sleepResolve = null;
+
+    // When the tab is hidden, browsers throttle setTimeout to 1+ min.
+    // Abort the sleep so the fetch loop can immediately catch up on resume.
+    this._onVisible = () => {
+      if (document.visibilityState === "visible" && this._sleepResolve) {
+        this._sleepResolve();
+        this._sleepTimer = null;
+        this._sleepResolve = null;
+      }
+    };
   }
 
   async start(playlistUrl) {
     this.playlistUrl = playlistUrl;
     this.running = true;
     this.abortController = new AbortController();
+
+    document.addEventListener("visibilitychange", this._onVisible);
 
     while (this.running) {
       try {
@@ -58,9 +73,10 @@ export class HlsController {
           break;
         }
 
-        const reloadMs = this.lowLatency && info.partTarget
-          ? Math.max(150, info.partTarget * 500)
-          : Math.max(500, info.targetDuration * 500);
+        const reloadMs =
+          this.lowLatency && info.partTarget
+            ? Math.max(150, info.partTarget * 500)
+            : Math.max(500, info.targetDuration * 500);
 
         await this.#sleep(reloadMs);
       } catch (err) {
@@ -71,6 +87,8 @@ export class HlsController {
         await this.#sleep(500);
       }
     }
+
+    document.removeEventListener("visibilitychange", this._onVisible);
   }
 
   stop() {
@@ -79,6 +97,15 @@ export class HlsController {
       this.abortController.abort();
       this.abortController = null;
     }
+
+    // Abort any pending sleep so the loop can exit immediately.
+    if (this._sleepResolve) {
+      this._sleepResolve();
+      this._sleepTimer = null;
+      this._sleepResolve = null;
+    }
+
+    document.removeEventListener("visibilitychange", this._onVisible);
     this.seen.clear();
     this.initLoaded = false;
   }
@@ -106,6 +133,13 @@ export class HlsController {
   }
 
   #sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      this._sleepTimer = setTimeout(() => {
+        this._sleepTimer = null;
+        this._sleepResolve = null;
+        resolve();
+      }, ms);
+      this._sleepResolve = resolve;
+    });
   }
 }
