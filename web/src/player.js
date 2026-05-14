@@ -38,21 +38,46 @@ export class HlsWasmPlayer {
     this.segmentSeq = 0;
     this.segmentInfoQueue = [];
     this.maxPendingSegmentInfo = 60;
+
+    if (navigator.wakeLock) navigator.wakeLock.request("screen");
   }
 
   async init() {
-    await this.audio.init();
+    this.audio.init();
 
     await this.wasm.init({
-      onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, codecName) => {
+      onVideoFrame: (
+        width,
+        height,
+        yPtr,
+        yStride,
+        uPtr,
+        uStride,
+        vPtr,
+        vStride,
+        ptsMs,
+        codecName,
+      ) => {
         const ySize = yStride * height;
         const uvHeight = height >> 1;
         const uSize = uStride * uvHeight;
         const vSize = vStride * uvHeight;
 
-        const y = new Uint8Array(this.wasm.module.HEAPU8.buffer, yPtr, ySize).slice();
-        const u = new Uint8Array(this.wasm.module.HEAPU8.buffer, uPtr, uSize).slice();
-        const v = new Uint8Array(this.wasm.module.HEAPU8.buffer, vPtr, vSize).slice();
+        const y = new Uint8Array(
+          this.wasm.module.HEAPU8.buffer,
+          yPtr,
+          ySize,
+        ).slice();
+        const u = new Uint8Array(
+          this.wasm.module.HEAPU8.buffer,
+          uPtr,
+          uSize,
+        ).slice();
+        const v = new Uint8Array(
+          this.wasm.module.HEAPU8.buffer,
+          vPtr,
+          vSize,
+        ).slice();
 
         const normalizedPtsMs = this.#normalizeVideoPts(ptsMs);
         this.#enqueueVideoFrame({
@@ -67,15 +92,50 @@ export class HlsWasmPlayer {
           ptsMs: normalizedPtsMs,
         });
 
-        this.#logSegmentVideoInfo(width, height, yStride, uStride, vStride, normalizedPtsMs, codecName);
+        this.#logSegmentVideoInfo(
+          width,
+          height,
+          yStride,
+          uStride,
+          vStride,
+          normalizedPtsMs,
+          codecName,
+        );
       },
-      onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs, codecName) => {
+      onAudioFrame: (
+        channels,
+        sampleRate,
+        sampleCount,
+        dataPtr,
+        ptsMs,
+        codecName,
+      ) => {
         const sampleNum = channels * sampleCount;
-        const pcm = new Float32Array(this.wasm.module.HEAPU8.buffer, dataPtr, sampleNum).slice();
-        const normalizedPtsMs = this.#normalizeAudioPts(ptsMs, sampleCount, sampleRate);
-        this.audio.enqueueFrame({ channels, sampleRate, sampleCount, pcm, ptsMs: normalizedPtsMs });
+        const pcm = new Float32Array(
+          this.wasm.module.HEAPU8.buffer,
+          dataPtr,
+          sampleNum,
+        ).slice();
+        const normalizedPtsMs = this.#normalizeAudioPts(
+          ptsMs,
+          sampleCount,
+          sampleRate,
+        );
+        this.audio.enqueueFrame({
+          channels,
+          sampleRate,
+          sampleCount,
+          pcm,
+          ptsMs: normalizedPtsMs,
+        });
 
-        this.#logSegmentAudioInfo(channels, sampleRate, sampleCount, normalizedPtsMs, codecName);
+        this.#logSegmentAudioInfo(
+          channels,
+          sampleRate,
+          sampleCount,
+          normalizedPtsMs,
+          codecName,
+        );
       },
       onLog: (level, msg) => {
         this.log(`[wasm:${level}] ${msg}`);
@@ -215,7 +275,11 @@ export class HlsWasmPlayer {
       const audioBuffered = this.audio.getBufferedSeconds();
       const videoLeadSec = this.#getVideoLeadSec();
       const queueOk = this.videoQueue.length <= this.videoQueueHighWatermark;
-      if (audioBuffered <= this.maxAudioBufferedSec && videoLeadSec <= this.maxVideoLeadSec && queueOk) {
+      if (
+        audioBuffered <= this.maxAudioBufferedSec &&
+        videoLeadSec <= this.maxVideoLeadSec &&
+        queueOk
+      ) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -301,7 +365,15 @@ export class HlsWasmPlayer {
     }
   }
 
-  #logSegmentVideoInfo(width, height, yStride, uStride, vStride, ptsMs, codecName) {
+  #logSegmentVideoInfo(
+    width,
+    height,
+    yStride,
+    uStride,
+    vStride,
+    ptsMs,
+    codecName,
+  ) {
     const ctx = this.segmentInfoQueue.find((item) => !item.videoInfo);
     if (!ctx) {
       return;
