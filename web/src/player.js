@@ -38,6 +38,7 @@ export class HlsWasmPlayer {
     this.segmentSeq = 0;
     this.segmentInfoQueue = [];
     this.maxPendingSegmentInfo = 60;
+    this.hevcCompatFallbackTriggered = false;
 
     if (navigator.wakeLock) navigator.wakeLock.request("screen");
   }
@@ -139,6 +140,7 @@ export class HlsWasmPlayer {
       },
       onLog: (level, msg) => {
         this.log(`[wasm:${level}] ${msg}`);
+        this.#maybeFallbackFromLowLatency(msg);
       },
     });
   }
@@ -148,6 +150,7 @@ export class HlsWasmPlayer {
       await this.stop();
     }
 
+    this.hevcCompatFallbackTriggered = false;
     this.running = true;
     this.videoQueue.length = 0;
     this.videoClockOffsetSec = null;
@@ -164,6 +167,7 @@ export class HlsWasmPlayer {
     this.hls = new HlsController({
       mode,
       lowLatency: true,
+      allowPreloadHint: false,
       onSegment: async (bytes, isInitSegment, segmentUrl) => {
         await this.#waitForFlowControl();
         if (!isInitSegment) {
@@ -211,6 +215,24 @@ export class HlsWasmPlayer {
   destroy() {
     this.stop();
     this.wasm.destroy();
+  }
+
+  #maybeFallbackFromLowLatency(msg) {
+    if (!this.hls || !this.hls.lowLatency || this.hevcCompatFallbackTriggered) {
+      return;
+    }
+
+    const text = String(msg || "").toLowerCase();
+    const hevcHeaderParseFailed = text.includes("failed to parse header of nalu");
+    const hevcInvalidData = text.includes("hevc") && text.includes("invalid data found");
+
+    if (!hevcHeaderParseFailed && !hevcInvalidData) {
+      return;
+    }
+
+    this.hevcCompatFallbackTriggered = true;
+    this.hls.setLowLatency(false);
+    this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
 
   #enqueueVideoFrame(frame) {

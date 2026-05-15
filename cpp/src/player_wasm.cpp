@@ -12,6 +12,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/bsf.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/frame.h>
@@ -53,6 +54,19 @@ EM_JS(void, js_on_log, (int level, const char* msg), {
     Module.onLog(level, UTF8ToString(msg));
   }
 });
+
+static void custom_av_log_callback(void* ptr, int level, const char* fmt, va_list vl) {
+  if (level > AV_LOG_WARNING) return;
+  char line[1024];
+  vsnprintf(line, sizeof(line), fmt, vl);
+  
+  // Filter out HEVC NALU parse errors that spam the console for LL-HLS fragments
+  if (strstr(line, "Failed to parse header of NALU") || strstr(line, "Invalid data found when processing input")) {
+    return;
+  }
+  
+  js_on_log(level, line);
+}
 
 namespace {
 
@@ -103,6 +117,10 @@ class Player {
   }
 
   void reset() {
+    if (hevc_bsf_ctx_) {
+      av_bsf_free(&hevc_bsf_ctx_);
+      hevc_bsf_ctx_ = nullptr;
+    }
     if (video_dec_ctx_) {
       avcodec_free_context(&video_dec_ctx_);
     }
@@ -186,9 +204,39 @@ class Player {
       return AVERROR(ENOMEM);
     }
 
-    while ((ret = av_read_frame(fmt, pkt)) >= 0) {
+    while (true) {
+      ret = av_read_frame(fmt, pkt);
+      if (ret == AVERROR_EOF) {
+        break;
+      }
+      if (ret < 0) {
+        if (ret == AVERROR_INVALIDDATA) {
+          continue;
+        }
+        logError("av_read_frame failed", ret);
+        break;
+      }
+
       if (pkt->stream_index == video_stream_index_ && video_dec_ctx_) {
-        decodePacket(video_dec_ctx_, pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+        if (hevc_bsf_ctx_) {
+          ret = av_bsf_send_packet(hevc_bsf_ctx_, pkt);
+          if (ret >= 0) {
+            while (true) {
+              AVPacket* bsf_pkt = av_packet_alloc();
+              ret = av_bsf_receive_packet(hevc_bsf_ctx_, bsf_pkt);
+              if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                av_packet_free(&bsf_pkt);
+                break;
+              }
+              if (ret >= 0) {
+                decodePacket(video_dec_ctx_, bsf_pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+              }
+              av_packet_free(&bsf_pkt);
+            }
+          }
+        } else {
+          decodePacket(video_dec_ctx_, pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+        }
       } else if (pkt->stream_index == audio_stream_index_ && audio_dec_ctx_) {
         decodePacket(audio_dec_ctx_, pkt, frame, false, fmt->streams[audio_stream_index_]->time_base);
       }
@@ -240,6 +288,30 @@ class Player {
     if (ret < 0) {
       logError("avcodec_parameters_to_context(video) failed", ret);
       return ret;
+    }
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC || stream->codecpar->codec_id == AV_CODEC_ID_H264) {
+      // LL-HLS/fMP4 fragments may provide non frame-complete access units.
+      video_dec_ctx_->flags2 |= AV_CODEC_FLAG2_CHUNKS;
+    }
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
+      // Keep decoding through damaged HEVC NAL units when possible.
+      video_dec_ctx_->err_recognition |= AV_EF_IGNORE_ERR;
+
+      const AVBitStreamFilter* bsf = av_bsf_get_by_name("hevc_mp4toannexb");
+      if (bsf) {
+        if (av_bsf_alloc(bsf, &hevc_bsf_ctx_) >= 0) {
+          if (avcodec_parameters_copy(hevc_bsf_ctx_->par_in, stream->codecpar) >= 0) {
+            hevc_bsf_ctx_->time_base_in = stream->time_base;
+            if (av_bsf_init(hevc_bsf_ctx_) < 0) {
+              av_bsf_free(&hevc_bsf_ctx_);
+            }
+          } else {
+            av_bsf_free(&hevc_bsf_ctx_);
+          }
+        }
+      }
     }
 
     ret = avcodec_open2(video_dec_ctx_, codec, nullptr);
@@ -305,6 +377,10 @@ class Player {
   void decodePacket(AVCodecContext* dec_ctx, AVPacket* pkt, AVFrame* frame, bool is_video, AVRational time_base) {
     int ret = avcodec_send_packet(dec_ctx, pkt);
     if (ret < 0) {
+      if (ret == AVERROR_INVALIDDATA && is_video) {
+        // Skip malformed video packets and continue with subsequent packets.
+        return;
+      }
       logError("avcodec_send_packet failed", ret);
       return;
     }
@@ -315,6 +391,9 @@ class Player {
         break;
       }
       if (ret < 0) {
+        if (ret == AVERROR_INVALIDDATA && is_video) {
+          break;
+        }
         logError("avcodec_receive_frame failed", ret);
         break;
       }
@@ -455,6 +534,7 @@ class Player {
 
   AVCodecContext* video_dec_ctx_ = nullptr;
   AVCodecContext* audio_dec_ctx_ = nullptr;
+  AVBSFContext* hevc_bsf_ctx_ = nullptr;
 
   SwsContext* sws_ctx_ = nullptr;
   SwrContext* swr_ctx_ = nullptr;
@@ -482,6 +562,11 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
 int player_create() {
+  static bool log_initialized = false;
+  if (!log_initialized) {
+    av_log_set_callback(custom_av_log_callback);
+    log_initialized = true;
+  }
   const int handle = g_next_handle++;
   g_players.emplace(handle, std::make_unique<Player>());
   return handle;

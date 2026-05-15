@@ -1,9 +1,10 @@
 import { parseMediaPlaylist } from "./playlist_parser.js";
 
 export class HlsController {
-  constructor({ mode = "live", lowLatency = true, onSegment }) {
+  constructor({ mode = "live", lowLatency = true, allowPreloadHint = false, onSegment }) {
     this.mode = mode;
     this.lowLatency = lowLatency;
+    this.allowPreloadHint = allowPreloadHint;
     this.onSegment = onSegment;
 
     this.abortController = null;
@@ -45,18 +46,19 @@ export class HlsController {
         }
 
         const candidates = [];
+        const useParts = this.lowLatency && info.parts.length > 0;
 
-        if (this.lowLatency && info.parts.length > 0) {
+        if (useParts) {
           for (const part of info.parts) {
             candidates.push(part.url);
           }
+        } else {
+          for (const seg of info.segments) {
+            candidates.push(seg.url);
+          }
         }
 
-        for (const seg of info.segments) {
-          candidates.push(seg.url);
-        }
-
-        if (this.lowLatency && info.preloadHint) {
+        if (useParts && this.allowPreloadHint && info.preloadHint) {
           candidates.push(info.preloadHint);
         }
 
@@ -108,6 +110,18 @@ export class HlsController {
     document.removeEventListener("visibilitychange", this._onVisible);
     this.seen.clear();
     this.initLoaded = false;
+  }
+
+  setLowLatency(enabled, { clearSeen = false } = {}) {
+    const next = Boolean(enabled);
+    if (this.lowLatency === next) {
+      return;
+    }
+
+    this.lowLatency = next;
+    if (clearSeen) {
+      this.seen.clear();
+    }
   }
 
   async #fetchText(url) {
