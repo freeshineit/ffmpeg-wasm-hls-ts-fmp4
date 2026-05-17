@@ -19,6 +19,20 @@
             <main class="player-layout">
                 <section class="video-panel">
                     <canvas id="videoCanvas" width="1280" height="720"></canvas>
+                    <div class="progress-row">
+                        <span id="progressLabel" class="progress-label"
+                            >0:00 / 0:00</span
+                        >
+                        <input
+                            type="range"
+                            id="progressBar"
+                            class="progress-bar"
+                            min="0"
+                            max="100"
+                            value="0"
+                            step="0.1"
+                        />
+                    </div>
                 </section>
 
                 <aside class="control-panel">

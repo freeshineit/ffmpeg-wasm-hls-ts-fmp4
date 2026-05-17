@@ -41,6 +41,8 @@ export class HlsWasmPlayer {
     this.segmentInfoQueue = [];
     this.maxPendingSegmentInfo = 60;
     this.hevcCompatFallbackTriggered = false;
+    this._totalDuration = 0;
+    this._seekBaseTime = 0;
   }
 
   async init() {
@@ -188,7 +190,9 @@ export class HlsWasmPlayer {
     this.hls = new HlsController({
       mode,
       lowLatency: true,
-      allowPreloadHint: false,
+      onDuration: (dur) => {
+        this._totalDuration = dur;
+      },
       onSegment: async (bytes, isInitSegment, segmentUrl) => {
         await this.#waitForFlowControl();
         if (!isInitSegment) {
@@ -205,6 +209,10 @@ export class HlsWasmPlayer {
 
   async stop() {
     this.running = false;
+    if (this._visibilityHandler) {
+      document.removeEventListener("visibilitychange", this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
 
     if (this.hls) {
       this.hls.stop();
@@ -240,14 +248,56 @@ export class HlsWasmPlayer {
     this._initPromise = null;
   }
 
+  /** Current playback time in seconds (from audio clock). */
+  getCurrentTime() {
+    const t = this.audio.getMediaTimeSec();
+    return (t !== null ? t : 0) + this._seekBaseTime;
+  }
+
+  /** Total duration in seconds (from playlist). */
+  getTotalDuration() {
+    return this._totalDuration || 0;
+  }
+
+  /** Seek to a target time (seconds). */
+  async seek(timeSec) {
+    if (!this.running || !this.hls) {
+      this.log("Cannot seek: not playing.");
+      return;
+    }
+    this.log(`Seeking to ${timeSec.toFixed(1)}s`);
+
+    // Reset decoder state
+    this.wasm.reset();
+    this.audio.reset();
+    this.videoQueue.length = 0;
+    this.videoClockOffsetSec = null;
+    this.lastVideoRawPtsMs = null;
+    this.lastVideoNormPtsMs = null;
+    this.lastAudioRawPtsMs = null;
+    this.lastAudioNormPtsMs = null;
+    this.droppedVideoFrames = 0;
+    this.lastDropLogAt = 0;
+
+    // Seek in HLS controller (restarts loop from target segment)
+    const segmentStart = await this.hls.seekTo(timeSec);
+    // Use the actual segment start time as the base,
+    // so getCurrentTime() reflects the real position.
+    this._seekBaseTime = segmentStart;
+    this.log(`Seek done, segment starts at ${segmentStart.toFixed(1)}s`);
+  }
+
   #maybeFallbackFromLowLatency(msg) {
     if (!this.hls || !this.hls.lowLatency || this.hevcCompatFallbackTriggered) {
       return;
     }
 
     const text = String(msg || "").toLowerCase();
-    const hevcHeaderParseFailed = text.includes("failed to parse header of nalu");
-    const hevcInvalidData = text.includes("hevc") && text.includes("invalid data found");
+    const hevcHeaderParseFailed = text.includes(
+      "failed to parse header of nalu",
+    );
+    const hevcInvalidData =
+      text.includes("hevc") && text.includes("invalid data found");
 
     if (!hevcHeaderParseFailed && !hevcInvalidData) {
       return;
@@ -255,7 +305,9 @@ export class HlsWasmPlayer {
 
     this.hevcCompatFallbackTriggered = true;
     this.hls.setLowLatency(false);
-    this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
+    this.log(
+      "[compat] HEVC NALU parse warning detected. Switched to segment-only mode.",
+    );
   }
 
   #enqueueVideoFrame(frame) {
@@ -270,6 +322,33 @@ export class HlsWasmPlayer {
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
     }
+
+    const onVisibilityChange = () => {
+      if (document.hidden) return;
+      if (!this.running) return;
+
+      const now = performance.now() / 1000;
+      const mediaTime = this.audio.getMediaTimeSec();
+      if (mediaTime !== null && this.videoQueue.length > 0) {
+        while (this.videoQueue.length > 0) {
+          const headPtsSec = this.videoQueue[0].ptsMs / 1000;
+          if (headPtsSec < mediaTime - 0.5) {
+            this.videoQueue.shift();
+          } else {
+            break;
+          }
+        }
+
+        if (this.videoQueue.length > 0) {
+          this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - now;
+        } else {
+          this.videoClockOffsetSec = null;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    this._visibilityHandler = onVisibilityChange;
 
     const tick = () => {
       if (!this.running) {

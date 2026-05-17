@@ -184,6 +184,10 @@ export class HlsWasmPlayer {
 
   async stop() {
     this.running = false;
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
 
     if (this.hls) {
       this.hls.stop();
@@ -247,6 +251,33 @@ export class HlsWasmPlayer {
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
     }
+    
+    const onVisibilityChange = () => {
+      // if (document.hidden) return;
+      if (!this.running) return;
+      
+      const now = performance.now() / 1000;
+      const mediaTime = this.audio.getMediaTimeSec();
+      if (mediaTime !== null && this.videoQueue.length > 0) {
+        while (this.videoQueue.length > 0) {
+           const headPtsSec = this.videoQueue[0].ptsMs / 1000;
+           if (headPtsSec < mediaTime - 0.5) {
+             this.videoQueue.shift();
+           } else {
+             break;
+           }
+        }
+        
+        if (this.videoQueue.length > 0) {
+          this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - now;
+        } else {
+          this.videoClockOffsetSec = null;
+        }
+      }
+    };
+    
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    this._visibilityHandler = onVisibilityChange;
 
     const tick = () => {
       if (!this.running) {
