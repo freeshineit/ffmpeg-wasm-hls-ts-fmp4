@@ -9,9 +9,9 @@ export class WasmBridge {
   async init({ onVideoFrame, onAudioFrame, onLog }) {
     await this.#ensureWasmScriptLoaded();
 
-    const moduleFactory = globalThis.createPlayerModule;
+    const moduleFactory = globalThis.HlsPlayerModule;
     if (typeof moduleFactory !== "function") {
-      throw new Error("createPlayerModule is not available after loading wasm JS.");
+      throw new Error("HlsPlayerModule is not available after loading wasm JS.");
     }
 
     this.module = await moduleFactory({
@@ -30,7 +30,7 @@ export class WasmBridge {
   }
 
   async #ensureWasmScriptLoaded() {
-    if (typeof globalThis.createPlayerModule === "function") {
+    if (typeof globalThis.HlsPlayerModule === "function") {
       return;
     }
 
@@ -80,6 +80,13 @@ export class WasmBridge {
     if (this.module && this.handle) {
       this.module._player_reset(this.handle);
     }
+  }
+
+  getCurrentTime() {
+    if (this.module && this.handle && this.module._player_get_current_time) {
+      return this.module._player_get_current_time(this.handle);
+    }
+    return 0;
   }
 
   destroy() {

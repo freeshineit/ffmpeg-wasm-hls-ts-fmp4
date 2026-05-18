@@ -35,6 +35,8 @@ const player = new HlsWasmPlayer({
   log,
 });
 
+window.player = player; // Expose for debugging
+
 (async () => {
   try {
     await player.init();

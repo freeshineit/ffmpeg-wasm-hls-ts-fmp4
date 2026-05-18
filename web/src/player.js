@@ -4,9 +4,10 @@ import { HlsController } from "./hls/hls_controller.js";
 import { WasmBridge } from "./wasm/wasm_bridge.js";
 
 export class HlsWasmPlayer {
-  constructor({ canvas, wasmJsUrl, wasmFileUrl, log }) {
+  constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
     this.canvas = canvas;
     this.log = log || (() => {});
+    this.onIFrame = onIFrame;
 
     this.renderer = new WebGLRenderer(canvas);
     this.audio = new AudioRenderer();
@@ -43,6 +44,10 @@ export class HlsWasmPlayer {
     if (navigator.wakeLock) navigator.wakeLock.request("screen");
   }
 
+  get currentTime() {
+    return this.audio ? this.audio.getMediaTimeSec() : 0;
+  }
+
   async init() {
     this.audio.init();
 
@@ -57,6 +62,7 @@ export class HlsWasmPlayer {
         vPtr,
         vStride,
         ptsMs,
+        isKeyFrame,
         codecName,
       ) => {
         const ySize = yStride * height;
@@ -91,7 +97,12 @@ export class HlsWasmPlayer {
           uStride,
           vStride,
           ptsMs: normalizedPtsMs,
+          isKeyFrame: !!isKeyFrame,
         });
+
+        if (isKeyFrame && this.onIFrame) {
+          this.onIFrame(normalizedPtsMs);
+        }
 
         this.#logSegmentVideoInfo(
           width,

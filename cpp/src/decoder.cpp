@@ -34,10 +34,11 @@ EM_JS(void, js_on_video_frame,
        int v_ptr,
        int v_stride,
        double pts_ms,
+       int is_key_frame,
        const char* codec_name),
       {
         if (Module.onVideoFrame) {
-          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms, UTF8ToString(codec_name));
+          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms, is_key_frame, UTF8ToString(codec_name));
         }
       });
 
@@ -116,7 +117,12 @@ class Player {
     return decodeBuffer(data, size);
   }
 
+  double getCurrentTime() const {
+    return current_time_ms_;
+  }
+
   void reset() {
+    current_time_ms_ = 0.0;
     if (hevc_bsf_ctx_) {
       av_bsf_free(&hevc_bsf_ctx_);
       hevc_bsf_ctx_ = nullptr;
@@ -461,6 +467,7 @@ class Player {
 
     sws_scale(sws_ctx_, src->data, src->linesize, 0, src->height, video_frame_yuv_->data, video_frame_yuv_->linesize);
 
+    current_time_ms_ = pts_ms;
     js_on_video_frame(video_width_,
                       video_height_,
                       reinterpret_cast<intptr_t>(video_frame_yuv_->data[0]),
@@ -470,6 +477,7 @@ class Player {
                       reinterpret_cast<intptr_t>(video_frame_yuv_->data[2]),
                       video_frame_yuv_->linesize[2],
                       pts_ms,
+                      (src->flags & AV_FRAME_FLAG_KEY) || src->pict_type == AV_PICTURE_TYPE_I ? 1 : 0,
                       video_dec_ctx_->codec && video_dec_ctx_->codec->name ? video_dec_ctx_->codec->name : "unknown");
   }
 
@@ -500,6 +508,9 @@ class Player {
       return;
     }
 
+    if (video_stream_index_ < 0) {
+      current_time_ms_ = pts_ms;
+    }
     js_on_audio_frame(channels,
                       audio_dec_ctx_->sample_rate,
                       converted,
@@ -545,6 +556,7 @@ class Player {
   int video_height_ = 0;
   int video_src_pix_fmt_ = AV_PIX_FMT_NONE;
 
+  double current_time_ms_ = 0.0;
   int video_stream_index_ = -1;
   int audio_stream_index_ = -1;
 
@@ -596,6 +608,15 @@ void player_reset(int handle) {
     return;
   }
   it->second->reset();
+}
+
+EMSCRIPTEN_KEEPALIVE
+double player_get_current_time(int handle) {
+  auto it = g_players.find(handle);
+  if (it == g_players.end()) {
+    return 0.0;
+  }
+  return it->second->getCurrentTime();
 }
 
 }  // extern "C"

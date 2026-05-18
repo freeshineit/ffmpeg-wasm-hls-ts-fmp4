@@ -34,7 +34,7 @@ EM_FLAGS := \
 	-sDYNAMIC_EXECUTION=0 \
 	-sMALLOC=emmalloc \
 	-sINCOMING_MODULE_JS_API="['locateFile']" \
-	-sEXPORTED_FUNCTIONS="['_malloc','_free','_player_create','_player_destroy','_player_feed_segment','_player_reset']" \
+	-sEXPORTED_FUNCTIONS="['_malloc','_free','_player_create','_player_destroy','_player_feed_segment','_player_reset','_player_get_current_time']" \
 	-sEXPORTED_RUNTIME_METHODS="['HEAPU8']"
 
 .PHONY: all ffmpeg wasm clean install-web docker-build docker-ffmpeg docker-wasm docker-shell
