@@ -15,8 +15,8 @@ function log(msg) {
 
 const player = new HlsWasmPlayer({
   canvas,
-  wasmJsUrl: "/wasm/player_wasm.js",
-  wasmFileUrl: "/wasm/player_wasm.wasm",
+  wasmJsUrl: "/wasm/decoder.js",
+  wasmFileUrl: "/wasm/decoder.wasm",
   log,
 });
 

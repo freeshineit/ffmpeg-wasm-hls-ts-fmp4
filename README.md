@@ -49,15 +49,15 @@ make wasm
 ```
 
 生成文件：
-- `cpp/build/player_wasm.js`
-- `cpp/build/player_wasm.wasm`
+- `cpp/build/decoder.js`
+- `cpp/build/decoder.wasm`
 
 将它们拷贝到 Web 静态目录：
 
 ```bash
 mkdir -p web/public/wasm
-cp cpp/build/player_wasm.js web/public/wasm/
-cp cpp/build/player_wasm.wasm web/public/wasm/
+cp cpp/build/decoder.js web/public/wasm/
+cp cpp/build/decoder.wasm web/public/wasm/
 ```
 
 或使用：
@@ -79,7 +79,7 @@ npm run dev
 
 ## 核心实现说明
 
-### 1) WASM 解码核心（`cpp/src/player_wasm.cpp`）
+### 1) WASM 解码核心（`cpp/src/decoder.cpp`）
 
 - 对每个分片创建内存输入流（`AVIOContext`），由 FFmpeg 自动识别 TS/fMP4。
 - 自动寻找视频/音频流并打开解码器：

@@ -1,4 +1,4 @@
-#include "player_wasm.h"
+#include "decoder.h"
 
 #include <emscripten.h>
 

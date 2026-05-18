@@ -5,9 +5,9 @@ BUILD_DIR := $(ROOT_DIR)/build
 FFMPEG_PREFIX := $(ROOT_DIR)/third_party/ffmpeg-wasm
 FFMPEG_VERSION ?= 8.1
 BUILD_DATE_UTC := $(shell date -u "+%Y-%m-%d %H:%M:%S")
-BANNER_TEXT := /*! hls-wasm2 player_wasm | ffmpeg $(FFMPEG_VERSION) | build-date $(BUILD_DATE_UTC) */
-OUT_JS := $(BUILD_DIR)/player_wasm.js
-OUT_WASM := $(BUILD_DIR)/player_wasm.wasm
+BANNER_TEXT := /*! hls-wasm2 decoder.js | ffmpeg $(FFMPEG_VERSION) | build-date $(BUILD_DATE_UTC) */
+OUT_JS := $(BUILD_DIR)/decoder.js
+OUT_WASM := $(BUILD_DIR)/decoder.wasm
 
 CXX := em++
 CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables
@@ -47,9 +47,9 @@ ffmpeg:
 
 wasm: $(OUT_JS)
 
-$(OUT_JS): $(ROOT_DIR)/src/player_wasm.cpp $(ROOT_DIR)/include/player_wasm.h
+$(OUT_JS): $(ROOT_DIR)/src/decoder.cpp $(ROOT_DIR)/include/decoder.h
 	@mkdir -p $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ROOT_DIR)/src/player_wasm.cpp -o $(OUT_JS) $(LIBS) $(EM_FLAGS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(ROOT_DIR)/src/decoder.cpp -o $(OUT_JS) $(LIBS) $(EM_FLAGS)
 	@{ \
 		echo "$(BANNER_TEXT)"; \
 		cat "$(OUT_JS)"; \

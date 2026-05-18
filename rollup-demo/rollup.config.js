@@ -32,12 +32,12 @@ function copyAssets() {
         mkdirSync(wasmDir, { recursive: true });
       }
       copyFileSync(
-        resolve(__dirname, "public", "wasm", "player_wasm.js"),
-        resolve(wasmDir, "player_wasm.js"),
+        resolve(__dirname, "public", "wasm", "decoder.js"),
+        resolve(wasmDir, "decoder.js"),
       );
       copyFileSync(
-        resolve(__dirname, "public", "wasm", "player_wasm.wasm"),
-        resolve(wasmDir, "player_wasm.wasm"),
+        resolve(__dirname, "public", "wasm", "decoder.wasm"),
+        resolve(wasmDir, "decoder.wasm"),
       );
 
       const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");

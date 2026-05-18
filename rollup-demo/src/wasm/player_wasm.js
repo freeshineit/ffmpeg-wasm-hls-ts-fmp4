@@ -1,4 +1,4 @@
-/*! hls-wasm2 player_wasm | ffmpeg 8.1 | build-date 2026-05-10 */
+/*! hls-wasm2 decoder | ffmpeg 8.1 | build-date 2026-05-10 */
 var createPlayerModule = (() => {
   var _scriptName = globalThis.document?.currentScript?.src;
   return async function (moduleArg = {}) {
@@ -72,7 +72,7 @@ var createPlayerModule = (() => {
     }
     var wasmBinaryFile;
     function findWasmBinary() {
-      return locateFile("player_wasm.wasm");
+      return locateFile("decoder.wasm");
     }
     function getBinarySync(file) {
       if (readBinary) {
