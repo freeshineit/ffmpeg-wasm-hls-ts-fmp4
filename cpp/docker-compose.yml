@@ -1,0 +1,41 @@
+# docker-compose.yml for hls-wasm2
+# Provides convenient targets for building FFmpeg and decoder WASM
+
+services:
+  # Full build: FFmpeg + decoder WASM
+  build:
+    image: hls-wasm2-builder
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount output directories to host
+      - ./build:/workspace/build
+      - ./third_party/ffmpeg-wasm:/workspace/third_party/ffmpeg-wasm
+    command: make all
+
+  # Build only FFmpeg dependencies
+  build-ffmpeg:
+    extends:
+      service: build
+    command: make ffmpeg
+
+  # Build only the decoder WASM (requires pre-built FFmpeg)
+  build-wasm:
+    extends:
+      service: build
+    command: make wasm
+
+  # Install built WASM to web project
+  install-web:
+    extends:
+      service: build
+    command: make install-web
+
+  # Open a shell in the build environment
+  shell:
+    extends:
+      service: build
+    stdin_open: true
+    tty: true
+    command: /bin/bash

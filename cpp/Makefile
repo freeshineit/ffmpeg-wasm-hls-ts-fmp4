@@ -22,7 +22,7 @@ EM_FLAGS := \
 	-sINITIAL_MEMORY=134217728 \
 	-sMAXIMUM_MEMORY=1073741824 \
 	-sMODULARIZE=1 \
-	-sEXPORT_NAME=createPlayerModule \
+	-sEXPORT_NAME=HlsPlayerModule \
 	-sENVIRONMENT=web \
 	-sWASM=1 \
 	-sFILESYSTEM=0 \
@@ -37,7 +37,7 @@ EM_FLAGS := \
 	-sEXPORTED_FUNCTIONS="['_malloc','_free','_player_create','_player_destroy','_player_feed_segment','_player_reset']" \
 	-sEXPORTED_RUNTIME_METHODS="['HEAPU8']"
 
-.PHONY: all ffmpeg wasm clean install-web
+.PHONY: all ffmpeg wasm clean install-web docker-build docker-ffmpeg docker-wasm docker-shell
 
 all: ffmpeg wasm
 
@@ -62,3 +62,16 @@ install-web: wasm
 	mkdir -p $(ROOT_DIR)/../web/public/wasm
 	cp $(OUT_JS) $(ROOT_DIR)/../web/public/wasm/
 	cp $(OUT_WASM) $(ROOT_DIR)/../web/public/wasm/
+
+# Docker-based build targets
+docker-build:
+	@$(ROOT_DIR)/docker-build.sh all
+
+docker-ffmpeg:
+	@$(ROOT_DIR)/docker-build.sh ffmpeg
+
+docker-wasm:
+	@$(ROOT_DIR)/docker-build.sh wasm
+
+docker-shell:
+	@$(ROOT_DIR)/docker-build.sh shell

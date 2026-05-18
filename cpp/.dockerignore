@@ -1,0 +1,22 @@
+# Docker build artifacts and cache
+build/
+build_ffmpeg/
+third_party/ffmpeg-wasm/
+
+# Emscripten cache
+.emscripten_cache/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore

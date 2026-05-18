@@ -84,7 +84,13 @@ emconfigure ./configure \
   --extra-cxxflags="-Oz -ffunction-sections -fdata-sections" \
   --extra-ldflags="-Wl,--gc-sections"
 
-emmake make -j"$(sysctl -n hw.ncpu)"
+# Use nproc (Linux) or sysctl (macOS) for parallel job count
+if command -v nproc >/dev/null 2>&1; then
+  NPROC=$(nproc)
+else
+  NPROC=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+fi
+emmake make -j"${NPROC}"
 emmake make install
 
 echo "[3/3] Build finished."
