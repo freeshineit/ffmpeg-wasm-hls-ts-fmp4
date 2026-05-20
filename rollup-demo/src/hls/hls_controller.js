@@ -144,6 +144,8 @@ export class HlsController {
     const resp = await fetch(url, {
       signal: this.abortController.signal,
       cache: "no-store",
+      mode: "cors",
+      credentials: "omit",
     });
     if (!resp.ok) throw new Error(`Failed to fetch playlist: ${resp.status}`);
     return resp.text();
@@ -153,6 +155,8 @@ export class HlsController {
     const resp = await fetch(url, {
       signal: this.abortController.signal,
       cache: "no-store",
+      mode: "cors",
+      credentials: "omit",
     });
     if (!resp.ok) throw new Error(`Failed to fetch segment: ${resp.status}`);
     return new Uint8Array(await resp.arrayBuffer());

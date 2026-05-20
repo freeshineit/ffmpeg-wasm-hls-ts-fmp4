@@ -123,9 +123,9 @@ class Player {
 
   void reset() {
     current_time_ms_ = 0.0;
-    if (hevc_bsf_ctx_) {
-      av_bsf_free(&hevc_bsf_ctx_);
-      hevc_bsf_ctx_ = nullptr;
+    if (video_bsf_ctx_) {
+      av_bsf_free(&video_bsf_ctx_);
+      video_bsf_ctx_ = nullptr;
     }
     if (video_dec_ctx_) {
       avcodec_free_context(&video_dec_ctx_);
@@ -224,12 +224,12 @@ class Player {
       }
 
       if (pkt->stream_index == video_stream_index_ && video_dec_ctx_) {
-        if (hevc_bsf_ctx_) {
-          ret = av_bsf_send_packet(hevc_bsf_ctx_, pkt);
+        if (video_bsf_ctx_) {
+          ret = av_bsf_send_packet(video_bsf_ctx_, pkt);
           if (ret >= 0) {
             while (true) {
               AVPacket* bsf_pkt = av_packet_alloc();
-              ret = av_bsf_receive_packet(hevc_bsf_ctx_, bsf_pkt);
+              ret = av_bsf_receive_packet(video_bsf_ctx_, bsf_pkt);
               if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
                 av_packet_free(&bsf_pkt);
                 break;
@@ -290,7 +290,28 @@ class Player {
       return AVERROR(ENOMEM);
     }
 
-    int ret = avcodec_parameters_to_context(video_dec_ctx_, stream->codecpar);
+    AVCodecParameters* par = stream->codecpar;
+
+    if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC || stream->codecpar->codec_id == AV_CODEC_ID_H264) {
+      const char* bsf_name = (stream->codecpar->codec_id == AV_CODEC_ID_HEVC) ? "hevc_mp4toannexb" : "h264_mp4toannexb";
+      const AVBitStreamFilter* bsf = av_bsf_get_by_name(bsf_name);
+      if (bsf) {
+        if (av_bsf_alloc(bsf, &video_bsf_ctx_) >= 0) {
+          if (avcodec_parameters_copy(video_bsf_ctx_->par_in, stream->codecpar) >= 0) {
+            video_bsf_ctx_->time_base_in = stream->time_base;
+            if (av_bsf_init(video_bsf_ctx_) == 0) {
+              par = video_bsf_ctx_->par_out;
+            } else {
+              av_bsf_free(&video_bsf_ctx_);
+            }
+          } else {
+            av_bsf_free(&video_bsf_ctx_);
+          }
+        }
+      }
+    }
+
+    int ret = avcodec_parameters_to_context(video_dec_ctx_, par);
     if (ret < 0) {
       logError("avcodec_parameters_to_context(video) failed", ret);
       return ret;
@@ -304,20 +325,6 @@ class Player {
     if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
       // Keep decoding through damaged HEVC NAL units when possible.
       video_dec_ctx_->err_recognition |= AV_EF_IGNORE_ERR;
-
-      const AVBitStreamFilter* bsf = av_bsf_get_by_name("hevc_mp4toannexb");
-      if (bsf) {
-        if (av_bsf_alloc(bsf, &hevc_bsf_ctx_) >= 0) {
-          if (avcodec_parameters_copy(hevc_bsf_ctx_->par_in, stream->codecpar) >= 0) {
-            hevc_bsf_ctx_->time_base_in = stream->time_base;
-            if (av_bsf_init(hevc_bsf_ctx_) < 0) {
-              av_bsf_free(&hevc_bsf_ctx_);
-            }
-          } else {
-            av_bsf_free(&hevc_bsf_ctx_);
-          }
-        }
-      }
     }
 
     ret = avcodec_open2(video_dec_ctx_, codec, nullptr);
@@ -545,7 +552,7 @@ class Player {
 
   AVCodecContext* video_dec_ctx_ = nullptr;
   AVCodecContext* audio_dec_ctx_ = nullptr;
-  AVBSFContext* hevc_bsf_ctx_ = nullptr;
+  AVBSFContext* video_bsf_ctx_ = nullptr;
 
   SwsContext* sws_ctx_ = nullptr;
   SwrContext* swr_ctx_ = nullptr;
