@@ -70,27 +70,14 @@ export class HlsWasmPlayer {
           ptsMs,
           isKeyFrame,
           codecName,
+          yData,  // Now passed directly from Worker
+          uData,  // Now passed directly from Worker
+          vData   // Now passed directly from Worker
         ) => {
-          const ySize = yStride * height;
-          const uvHeight = height >> 1;
-          const uSize = uStride * uvHeight;
-          const vSize = vStride * uvHeight;
-
-          const y = new Uint8Array(
-            this.wasm.module.HEAPU8.buffer,
-            yPtr,
-            ySize,
-          ).slice();
-          const u = new Uint8Array(
-            this.wasm.module.HEAPU8.buffer,
-            uPtr,
-            uSize,
-          ).slice();
-          const v = new Uint8Array(
-            this.wasm.module.HEAPU8.buffer,
-            vPtr,
-            vSize,
-          ).slice();
+          // Worker already transferred these as Uint8Array
+          const y = yData;
+          const u = uData;
+          const v = vData;
 
           const normalizedPtsMs = this.#normalizeVideoPts(ptsMs);
           this.#enqueueVideoFrame({
@@ -127,13 +114,9 @@ export class HlsWasmPlayer {
           dataPtr,
           ptsMs,
           codecName,
+          pcmData // Now passed directly from Worker as Float32Array
         ) => {
-          const sampleNum = channels * sampleCount;
-          const pcm = new Float32Array(
-            this.wasm.module.HEAPU8.buffer,
-            dataPtr,
-            sampleNum,
-          ).slice();
+          const pcm = pcmData;
           const normalizedPtsMs = this.#normalizeAudioPts(
             ptsMs,
             sampleCount,

@@ -39,6 +39,10 @@ function copyAssets() {
         resolve(__dirname, "public", "wasm", "decoder.wasm"),
         resolve(wasmDir, "decoder.wasm"),
       );
+      copyFileSync(
+        resolve(__dirname, "src", "wasm", "wasm_worker.js"),
+        resolve(wasmDir, "wasm_worker.js"),
+      );
 
       const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");
       if (existsSync(toneSrc)) {
