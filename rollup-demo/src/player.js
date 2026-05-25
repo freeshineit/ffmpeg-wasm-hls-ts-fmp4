@@ -1,4 +1,4 @@
-import { WebGLRenderer } from "./renderer/webgl_renderer.js";
+import { WebGlRender } from "./renderer/webgl-420p.js";
 import { AudioRenderer } from "./audio/audio_renderer.js";
 import { HlsController } from "./hls/hls_controller.js";
 import { WasmBridge } from "./wasm/wasm_bridge.js";
@@ -9,7 +9,7 @@ export class HlsWasmPlayer {
     this.log = log || (() => {});
     this.onIFrame = onIFrame;
 
-    this.renderer = new WebGLRenderer(canvas);
+    this.renderer = new WebGlRender(canvas);
     this.audio = new AudioRenderer();
     this.wasm = new WasmBridge({ wasmJsUrl, wasmFileUrl });
 
@@ -80,6 +80,9 @@ export class HlsWasmPlayer {
           const v = vData;
 
           const normalizedPtsMs = this.#normalizeVideoPts(ptsMs);
+
+          // console.log(width,height , ptsMs, !isKeyFrame)
+
           this.#enqueueVideoFrame({
             width,
             height,
@@ -203,10 +206,10 @@ export class HlsWasmPlayer {
 
   async stop() {
     this.running = false;
-    if (this._visibilityHandler) {
-      document.removeEventListener("visibilitychange", this._visibilityHandler);
-      this._visibilityHandler = null;
-    }
+    // if (this._visibilityHandler) {
+    //   document.removeEventListener("visibilitychange", this._visibilityHandler);
+    //   this._visibilityHandler = null;
+    // }
 
     if (this.hls) {
       this.hls.stop();
@@ -317,32 +320,32 @@ export class HlsWasmPlayer {
       cancelAnimationFrame(this.renderRafId);
     }
 
-    const onVisibilityChange = () => {
-      if (document.hidden) return;
-      if (!this.running) return;
+    // const onVisibilityChange = () => {
+    //   if (document.hidden) return;
+    //   if (!this.running) return;
 
-      const now = performance.now() / 1000;
-      const mediaTime = this.audio.getMediaTimeSec();
-      if (mediaTime !== null && this.videoQueue.length > 0) {
-        while (this.videoQueue.length > 0) {
-          const headPtsSec = this.videoQueue[0].ptsMs / 1000;
-          if (headPtsSec < mediaTime - 0.5) {
-            this.videoQueue.shift();
-          } else {
-            break;
-          }
-        }
+    //   const now = performance.now() / 1000;
+    //   const mediaTime = this.audio.getMediaTimeSec();
+    //   if (mediaTime !== null && this.videoQueue.length > 0) {
+    //     while (this.videoQueue.length > 0) {
+    //       const headPtsSec = this.videoQueue[0].ptsMs / 1000;
+    //       if (headPtsSec < mediaTime - 0.5) {
+    //         this.videoQueue.shift();
+    //       } else {
+    //         break;
+    //       }
+    //     }
 
-        if (this.videoQueue.length > 0) {
-          this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - now;
-        } else {
-          this.videoClockOffsetSec = null;
-        }
-      }
-    };
+    //     if (this.videoQueue.length > 0) {
+    //       this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - now;
+    //     } else {
+    //       this.videoClockOffsetSec = null;
+    //     }
+    //   }
+    // };
 
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    this._visibilityHandler = onVisibilityChange;
+    // document.addEventListener("visibilitychange", onVisibilityChange);
+    // this._visibilityHandler = onVisibilityChange;
 
     const tick = () => {
       if (!this.running) {

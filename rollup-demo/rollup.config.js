@@ -18,37 +18,18 @@ function copyAssets() {
         mkdirSync(dist, { recursive: true });
       }
 
-      copyFileSync(
-        resolve(__dirname, "index.html"),
-        resolve(dist, "index.html"),
-      );
-      copyFileSync(
-        resolve(__dirname, "src", "styles.css"),
-        resolve(dist, "styles.css"),
-      );
-
       const wasmDir = resolve(dist, "wasm");
       if (!existsSync(wasmDir)) {
         mkdirSync(wasmDir, { recursive: true });
       }
       copyFileSync(
-        resolve(__dirname, "public", "wasm", "decoder.js"),
-        resolve(wasmDir, "decoder.js"),
-      );
-      copyFileSync(
-        resolve(__dirname, "public", "wasm", "decoder.wasm"),
-        resolve(wasmDir, "decoder.wasm"),
-      );
-      copyFileSync(
         resolve(__dirname, "src", "wasm", "wasm_worker.js"),
         resolve(wasmDir, "wasm_worker.js"),
       );
-
-      const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");
-      if (existsSync(toneSrc)) {
-        copyFileSync(toneSrc, resolve(dist, "tone_440hz_1s.wav"));
-      }
-
+      // const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");
+      // if (existsSync(toneSrc)) {
+      //   copyFileSync(toneSrc, resolve(dist, "tone_440hz_1s.wav"));
+      // }
       console.log("[copy-assets] static assets copied to dist/");
     },
   };
@@ -65,7 +46,7 @@ export default defineConfig({
     copyAssets(),
     process.env.ROLLUP_SERVE !== "false" &&
       serve({
-        contentBase: ["dist"],
+        contentBase: ["dist", "public"],
         host: "localhost",
         port: 3000,
         headers: {
