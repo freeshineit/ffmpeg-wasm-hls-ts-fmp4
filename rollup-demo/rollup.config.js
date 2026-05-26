@@ -38,8 +38,8 @@ function copyAssets() {
 export default defineConfig({
   input: "src/main.js",
   output: {
-    file: "dist/bundle.js",
-    format: "iife",
+    file: "dist/index.umd.js",
+    format: "umd",
     name: "HlsWasmApp",
   },
   plugins: [

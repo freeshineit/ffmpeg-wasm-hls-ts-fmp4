@@ -33,6 +33,55 @@
                             step="0.1"
                         />
                     </div>
+                    <div class="control-row">
+                        <button id="playBtn" type="button">Play</button>
+                        <button id="pauseBtn" type="button">Pause</button>
+                        <button id="loadBtn" type="button">Reload</button>
+
+                        <label class="ctrl-inline">
+                            <input id="muteToggle" type="checkbox" />
+                            <span>Mute</span>
+                        </label>
+
+                        <label class="ctrl-inline">
+                            <span>Vol</span>
+                            <input
+                                id="volumeBar"
+                                type="range"
+                                min="0"
+                                max="100"
+                                value="100"
+                                step="1"
+                            />
+                            <span id="volumeLabel" class="value-label">100%</span>
+                        </label>
+
+                        <label class="ctrl-inline">
+                            <span>Rate</span>
+                            <select id="rateSelect">
+                                <option value="0.5">0.5x</option>
+                                <option value="0.75">0.75x</option>
+                                <option value="1" selected>1x</option>
+                                <option value="1.25">1.25x</option>
+                                <option value="1.5">1.5x</option>
+                                <option value="2">2x</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-pill"
+                            >state:
+                            <strong id="stateLabel">idle</strong></span
+                        >
+                        <span class="status-pill"
+                            >buffered:
+                            <strong id="bufferedLabel">0.0s</strong></span
+                        >
+                        <span class="status-pill"
+                            >ended:
+                            <strong id="endedLabel">false</strong></span
+                        >
+                    </div>
                 </section>
 
                 <aside class="control-panel">
@@ -55,11 +104,17 @@
                         <button id="stopBtn">Stop</button>
                     </div>
 
+                    <details class="event-panel" open>
+                        <summary>Events</summary>
+                        <pre id="eventBox" class="event-box"></pre>
+                    </details>
+
                     <pre id="logBox" class="log-box"></pre>
                 </aside>
             </main>
         </div>
 
-        <script src="/bundle.js"></script>
+        <script src="/index.umd.js"></script>
+        <script src="/demo.js"></script>
     </body>
 </html>

@@ -179,3 +179,114 @@ button:hover {
     border: 2px solid #fff;
     cursor: pointer;
 }
+
+/* ---------- Player controls (added for API/events demo) ---------- */
+
+.control-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 12px 8px;
+}
+
+.control-row button {
+    width: auto;
+    padding: 6px 12px;
+    font-size: 13px;
+    background: rgba(6, 13, 23, 0.85);
+    color: var(--text);
+    border: 1px solid #31597b;
+}
+
+.control-row button:hover {
+    border-color: #6bc6ff;
+    transform: none;
+}
+
+.ctrl-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.ctrl-inline input[type="range"] {
+    width: 90px;
+    padding: 0;
+    height: 4px;
+    background: rgba(49, 89, 123, 0.4);
+    border: none;
+}
+
+.ctrl-inline input[type="checkbox"] {
+    width: auto;
+}
+
+.ctrl-inline select {
+    width: auto;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.value-label {
+    min-width: 36px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 12px 10px;
+}
+
+.status-pill {
+    font-size: 11px;
+    color: var(--text-dim);
+    background: rgba(6, 13, 23, 0.6);
+    border: 1px solid #1d3852;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.status-pill strong {
+    color: var(--text);
+    margin-left: 4px;
+    font-weight: 600;
+}
+
+.event-panel {
+    margin-top: 4px;
+    border: 1px solid #1d3852;
+    border-radius: 10px;
+    background: rgba(3, 8, 15, 0.6);
+}
+
+.event-panel summary {
+    cursor: pointer;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    user-select: none;
+}
+
+.event-box {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 180px;
+    overflow: auto;
+    font-size: 11px;
+    line-height: 1.4;
+    background: transparent;
+    border-top: 1px solid #1d3852;
+    color: var(--text);
+}
+
+.event-box .ev-name {
+    color: var(--action);
+    font-weight: 600;
+}

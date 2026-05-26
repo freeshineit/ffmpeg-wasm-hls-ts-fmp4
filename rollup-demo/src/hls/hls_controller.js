@@ -1,11 +1,12 @@
 import { parseMediaPlaylist } from "./playlist_parser.js";
 
 export class HlsController {
-  constructor({ mode = "live", lowLatency = true, onSegment, onDuration }) {
+  constructor({ mode = "live", lowLatency = true, onSegment, onDuration, onError }) {
     this.mode = mode;
     this.lowLatency = lowLatency;
     this.onSegment = onSegment;
     this.onDuration = onDuration || (() => {});
+    this.onError = onError || (() => {});
 
     this.abortController = null;
     this.running = false;
@@ -135,6 +136,11 @@ export class HlsController {
       } catch (err) {
         if (!this.running) break;
         console.error("HLS loop error:", err);
+        try {
+          this.onError(err);
+        } catch (_) {
+          /* swallow listener errors */
+        }
         await this.#sleep(500);
       }
     }

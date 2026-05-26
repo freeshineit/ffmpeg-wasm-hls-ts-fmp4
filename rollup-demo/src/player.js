@@ -3,11 +3,39 @@ import { AudioRenderer } from "./audio/audio_renderer.js";
 import { HlsController } from "./hls/hls_controller.js";
 import { WasmBridge } from "./wasm/wasm_bridge.js";
 
+/**
+ * Lightweight TimeRanges polyfill matching the HTMLMediaElement.buffered shape.
+ * Stores [start, end] seconds pairs.
+ */
+class TimeRangesLite {
+  constructor(ranges) {
+    this._ranges = ranges || [];
+    Object.defineProperty(this, "length", {
+      get: () => this._ranges.length,
+    });
+  }
+  start(i) {
+    if (i < 0 || i >= this._ranges.length) {
+      throw new Error("TimeRanges index out of range");
+    }
+    return this._ranges[i][0];
+  }
+  end(i) {
+    if (i < 0 || i >= this._ranges.length) {
+      throw new Error("TimeRanges index out of range");
+    }
+    return this._ranges[i][1];
+  }
+}
+
 export class HlsWasmPlayer {
   constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
     this.canvas = canvas;
     this.log = log || (() => {});
     this.onIFrame = onIFrame;
+
+    // Event delegate (HTMLMediaElement-style addEventListener / removeEventListener / dispatchEvent).
+    this._events = new EventTarget();
 
     this.renderer = new WebGlRender(canvas);
     this.audio = new AudioRenderer();
@@ -44,11 +72,135 @@ export class HlsWasmPlayer {
     this.hevcCompatFallbackTriggered = false;
     this._totalDuration = 0;
     this._seekBaseTime = 0;
+
+    // HTMLMediaElement-like state
+    this._currentSrc = "";
+    this._currentMode = "vod";
+    this._paused = true;
+    this._ended = false;
+    this._volume = 1.0;
+    this._muted = false;
+    this._playbackRate = 1.0;
+
+    // PTS of the most recently rendered video frame (seconds, normalized).
+    this._lastRenderedFramePtsSec = null;
+
+    // Event-emission bookkeeping
+    this._timeUpdateTimerId = 0;
+    this._lastEmittedTimeSec = -1;
+    this._loadedMetadataFired = false;
+    this._playingFired = false;
+    this._waitingFired = false;
+    this._lastDurationFired = -1;
   }
 
-  get currentTime() {
-    return this.audio ? this.audio.getMediaTimeSec() : 0;
+  /* ============================================================== */
+  /* Event API (HTMLMediaElement-style)                              */
+  /* ============================================================== */
+
+  addEventListener(type, listener, options) {
+    return this._events.addEventListener(type, listener, options);
   }
+  removeEventListener(type, listener, options) {
+    return this._events.removeEventListener(type, listener, options);
+  }
+  dispatchEvent(event) {
+    return this._events.dispatchEvent(event);
+  }
+
+  #emit(type, detail) {
+    try {
+      this._events.dispatchEvent(new CustomEvent(type, { detail }));
+    } catch (err) {
+      console.error(`[player] listener for "${type}" threw:`, err);
+    }
+  }
+
+  /* ============================================================== */
+  /* HTMLMediaElement-style properties                                */
+  /* ============================================================== */
+
+  /** Current playback position in seconds, sourced from rendered video frame. */
+  get currentTime() {
+    if (this._lastRenderedFramePtsSec !== null) {
+      return this._lastRenderedFramePtsSec + this._seekBaseTime;
+    }
+    return this._seekBaseTime || 0;
+  }
+
+  set currentTime(t) {
+    const sec = +t || 0;
+    void this.seek(sec);
+  }
+
+  /** Total duration in seconds (from playlist), or Infinity for live. */
+  get duration() {
+    if (this._currentMode === "live" && !this._totalDuration) {
+      return Infinity;
+    }
+    return this._totalDuration || 0;
+  }
+
+  get muted() {
+    return this._muted;
+  }
+  set muted(v) {
+    const next = !!v;
+    if (next === this._muted) return;
+    this._muted = next;
+    this.audio.setMuted(this._muted);
+    this.#emit("volumechange", { volume: this._volume, muted: this._muted });
+  }
+
+  get volume() {
+    return this._volume;
+  }
+  set volume(v) {
+    const clamped = Math.max(0, Math.min(1, +v || 0));
+    if (clamped === this._volume) return;
+    this._volume = clamped;
+    this.audio.setVolume(clamped);
+    this.#emit("volumechange", { volume: this._volume, muted: this._muted });
+  }
+
+  get playbackRate() {
+    return this._playbackRate;
+  }
+  set playbackRate(r) {
+    const clamped = Math.max(0.25, Math.min(4, +r || 1));
+    if (clamped === this._playbackRate) return;
+    this._playbackRate = clamped;
+    this.audio.setPlaybackRate(clamped);
+    this.#emit("ratechange", { playbackRate: this._playbackRate });
+  }
+
+  /** True once VOD playback has reached the end of the playlist timeline. */
+  get ended() {
+    return this._ended;
+  }
+
+  get paused() {
+    return this._paused;
+  }
+
+  /**
+   * TimeRanges of buffered media, mimicking HTMLMediaElement.buffered.
+   * Approximation: [currentTime, currentTime + audioBuffered + videoLead].
+   */
+  get buffered() {
+    const cur = this.currentTime;
+    const audioAhead = this.audio.getBufferedSeconds();
+    const videoAhead = this.#getVideoLeadSec();
+    const ahead = Math.max(audioAhead, videoAhead);
+    if (ahead <= 0 && this.videoQueue.length === 0) {
+      return new TimeRangesLite([]);
+    }
+    return new TimeRangesLite([[cur, cur + ahead]]);
+  }
+
+  /* ============================================================== */
+  /* Lifecycle                                                       */
+  /* ============================================================== */
 
   async init() {
     if (this._initPromise) {
@@ -57,6 +209,10 @@ export class HlsWasmPlayer {
 
     this._initPromise = (async () => {
       await this.audio.init();
+      this.audio.setVolume(this._volume);
+      this.audio.setMuted(this._muted);
+      this.audio.setPlaybackRate(this._playbackRate);
+
       await this.wasm.init({
         onVideoFrame: (
           width,
@@ -70,18 +226,14 @@ export class HlsWasmPlayer {
           ptsMs,
           isKeyFrame,
           codecName,
-          yData,  // Now passed directly from Worker
-          uData,  // Now passed directly from Worker
-          vData   // Now passed directly from Worker
+          yData,
+          uData,
+          vData,
         ) => {
-          // Worker already transferred these as Uint8Array
           const y = yData;
           const u = uData;
           const v = vData;
-
           const normalizedPtsMs = this.#normalizeVideoPts(ptsMs);
-
-          // console.log(width,height , ptsMs, !isKeyFrame)
 
           this.#enqueueVideoFrame({
             width,
@@ -117,7 +269,7 @@ export class HlsWasmPlayer {
           dataPtr,
           ptsMs,
           codecName,
-          pcmData // Now passed directly from Worker as Float32Array
+          pcmData,
         ) => {
           const pcm = pcmData;
           const normalizedPtsMs = this.#normalizeAudioPts(
@@ -170,6 +322,18 @@ export class HlsWasmPlayer {
       await this.stop();
     }
 
+    this._currentSrc = url;
+    this._currentMode = mode || "vod";
+    this._ended = false;
+    this._paused = false;
+    this._loadedMetadataFired = false;
+    this._playingFired = false;
+    this._waitingFired = false;
+    this._lastDurationFired = -1;
+    this._lastEmittedTimeSec = -1;
+
+    this.#emit("loadstart", { src: url, mode: this._currentMode });
+
     this.hevcCompatFallbackTriggered = false;
     this.running = true;
     this.videoQueue.length = 0;
@@ -182,13 +346,34 @@ export class HlsWasmPlayer {
     this.lastAudioRawPtsMs = null;
     this.lastAudioNormPtsMs = null;
     this.segmentInfoQueue.length = 0;
+    this._lastRenderedFramePtsSec = null;
+    this._seekBaseTime = 0;
+
     this.#startRenderLoop();
 
     this.hls = new HlsController({
-      mode,
+      mode: this._currentMode,
       lowLatency: true,
       onDuration: (dur) => {
+        const prev = this._totalDuration;
         this._totalDuration = dur;
+        if (dur !== prev) {
+          this.#emit("durationchange", { duration: this.duration });
+        }
+        if (!this._loadedMetadataFired) {
+          this._loadedMetadataFired = true;
+          this.#emit("loadedmetadata", {
+            duration: this.duration,
+            width: this.canvas?.width,
+            height: this.canvas?.height,
+          });
+        }
+      },
+      onError: (err) => {
+        this.#emit("error", {
+          message: err?.message || String(err),
+          error: err,
+        });
       },
       onSegment: async (bytes, isInitSegment, segmentUrl) => {
         await this.#waitForFlowControl();
@@ -200,16 +385,16 @@ export class HlsWasmPlayer {
       },
     });
 
-    this.log(`Start ${mode} playback: ${url}`);
+    this.log(`Start ${this._currentMode} playback: ${url}`);
     this.hls.start(url);
+    this.#startTimeUpdate();
   }
 
   async stop() {
+    const wasRunning = this.running;
     this.running = false;
-    // if (this._visibilityHandler) {
-    //   document.removeEventListener("visibilitychange", this._visibilityHandler);
-    //   this._visibilityHandler = null;
-    // }
+    this._paused = true;
+    this.#stopTimeUpdate();
 
     if (this.hls) {
       this.hls.stop();
@@ -232,9 +417,13 @@ export class HlsWasmPlayer {
     this.lastAudioNormPtsMs = null;
     this.#flushPendingSegmentInfos();
     this.segmentInfoQueue.length = 0;
+    this._lastRenderedFramePtsSec = null;
 
     this.wasm.reset();
     this.audio.reset();
+    if (wasRunning) {
+      this.#emit("abort", {});
+    }
     this.log("Playback stopped.");
   }
 
@@ -245,17 +434,6 @@ export class HlsWasmPlayer {
     this._initPromise = null;
   }
 
-  /** Current playback time in seconds (from audio clock). */
-  getCurrentTime() {
-    const t = this.audio.getMediaTimeSec();
-    return (t !== null ? t : 0) + this._seekBaseTime;
-  }
-
-  /** Total duration in seconds (from playlist). */
-  getTotalDuration() {
-    return this._totalDuration || 0;
-  }
-
   /** Seek to a target time (seconds). */
   async seek(timeSec) {
     if (!this.running || !this.hls) {
@@ -263,6 +441,9 @@ export class HlsWasmPlayer {
       return;
     }
     this.log(`Seeking to ${timeSec.toFixed(1)}s`);
+
+    this._ended = false;
+    this.#emit("seeking", { target: timeSec });
 
     // Reset decoder state
     this.wasm.reset();
@@ -275,14 +456,77 @@ export class HlsWasmPlayer {
     this.lastAudioNormPtsMs = null;
     this.droppedVideoFrames = 0;
     this.lastDropLogAt = 0;
+    this._lastRenderedFramePtsSec = null;
 
-    // Seek in HLS controller (restarts loop from target segment)
     const segmentStart = await this.hls.seekTo(timeSec);
-    // Use the actual segment start time as the base,
-    // so getCurrentTime() reflects the real position.
     this._seekBaseTime = segmentStart;
+    this._playingFired = false; // re-fire playing once first frame after seek renders
     this.log(`Seek done, segment starts at ${segmentStart.toFixed(1)}s`);
+    this.#emit("seeked", { currentTime: this.currentTime });
   }
+
+  /* ============================================================== */
+  /* HTMLMediaElement-style methods                                  */
+  /* ============================================================== */
+
+  /** Resume playback. If never started, this is a no-op (use `start()` first). */
+  async play() {
+    if (!this.hls) {
+      // Mirror HTMLMediaElement: play() on an unloaded element is a no-op
+      // (we don't auto-load because we don't know what URL to use).
+      this.log("play() ignored: no media loaded. Call start(url, mode) first.");
+      return;
+    }
+    if (!this._paused) return;
+    this._paused = false;
+    this.running = true;
+    this._playingFired = false;
+    if (!this.renderRafId) {
+      this.#startRenderLoop();
+    }
+    this.#startTimeUpdate();
+    await this.audio.resume();
+  }
+
+  /** Pause playback (audio + render loop), keep buffers and HLS state. */
+  async pause() {
+    if (this._paused) return;
+    this._paused = true;
+    this.running = false;
+    if (this.renderRafId) {
+      cancelAnimationFrame(this.renderRafId);
+      this.renderRafId = 0;
+    }
+    this.#stopTimeUpdate();
+    await this.audio.suspend();
+  }
+
+  /** Reload the current source. Equivalent to stop() + start(currentSrc). */
+  async load() {
+    if (!this._currentSrc) {
+      this.log("load() ignored: no current source.");
+      return;
+    }
+    const url = this._currentSrc;
+    const mode = this._currentMode;
+    await this.start(url, mode);
+  }
+
+  /* ============================================================== */
+  /* Backward-compatible helpers                                     */
+  /* ============================================================== */
+
+  getCurrentTime() {
+    return this.currentTime;
+  }
+
+  getTotalDuration() {
+    return this._totalDuration || 0;
+  }
+
+  /* ============================================================== */
+  /* Internals                                                       */
+  /* ============================================================== */
 
   #maybeFallbackFromLowLatency(msg) {
     if (!this.hls || !this.hls.lowLatency || this.hevcCompatFallbackTriggered) {
@@ -301,7 +545,11 @@ export class HlsWasmPlayer {
     }
 
     this.hevcCompatFallbackTriggered = true;
-    this.hls.setLowLatency(false);
+    if (typeof this.hls.setLowLatency === "function") {
+      this.hls.setLowLatency(false);
+    } else {
+      this.hls.lowLatency = false;
+    }
     this.log(
       "[compat] HEVC NALU parse warning detected. Switched to segment-only mode.",
     );
@@ -311,7 +559,6 @@ export class HlsWasmPlayer {
     if (!Number.isFinite(frame.ptsMs)) {
       return;
     }
-
     this.videoQueue.push(frame);
   }
 
@@ -319,33 +566,6 @@ export class HlsWasmPlayer {
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
     }
-
-    // const onVisibilityChange = () => {
-    //   if (document.hidden) return;
-    //   if (!this.running) return;
-
-    //   const now = performance.now() / 1000;
-    //   const mediaTime = this.audio.getMediaTimeSec();
-    //   if (mediaTime !== null && this.videoQueue.length > 0) {
-    //     while (this.videoQueue.length > 0) {
-    //       const headPtsSec = this.videoQueue[0].ptsMs / 1000;
-    //       if (headPtsSec < mediaTime - 0.5) {
-    //         this.videoQueue.shift();
-    //       } else {
-    //         break;
-    //       }
-    //     }
-
-    //     if (this.videoQueue.length > 0) {
-    //       this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - now;
-    //     } else {
-    //       this.videoClockOffsetSec = null;
-    //     }
-    //   }
-    // };
-
-    // document.addEventListener("visibilitychange", onVisibilityChange);
-    // this._visibilityHandler = onVisibilityChange;
 
     const tick = () => {
       if (!this.running) {
@@ -378,6 +598,8 @@ export class HlsWasmPlayer {
             continue;
           }
           this.renderer.renderYuv420(head);
+          this._lastRenderedFramePtsSec = headPtsSec;
+          this.#maybeMarkEnded();
           renderedThisTick += 1;
           if (renderedThisTick >= 2) {
             break;
@@ -390,6 +612,62 @@ export class HlsWasmPlayer {
 
     this.renderRafId = requestAnimationFrame(tick);
   }
+
+  #maybeMarkEnded() {
+    if (this._currentMode !== "vod") return;
+    if (this._ended) return;
+    if (!this._totalDuration) return;
+    if (this.currentTime >= this._totalDuration - 0.05 && this.videoQueue.length === 0) {
+      this._ended = true;
+      this._paused = true;
+      this.#stopTimeUpdate();
+      this.#emit("ended", { currentTime: this.currentTime });
+    }
+  }
+
+  /* ---------------- timeupdate / playing / waiting ---------------- */
+
+  #startTimeUpdate() {
+    this.#stopTimeUpdate();
+    this._timeUpdateTimerId = window.setInterval(() => {
+      const t = this.currentTime;
+      // emit timeupdate when time has actually moved (or first emission)
+      if (t !== this._lastEmittedTimeSec) {
+        this._lastEmittedTimeSec = t;
+        this.#emit("timeupdate", { currentTime: t });
+      }
+      this.#updatePlayingWaitingState();
+    }, 250);
+  }
+
+  #stopTimeUpdate() {
+    if (this._timeUpdateTimerId) {
+      clearInterval(this._timeUpdateTimerId);
+      this._timeUpdateTimerId = 0;
+    }
+  }
+
+  #updatePlayingWaitingState() {
+    if (this._paused || this._ended) return;
+    const hasFrame = this._lastRenderedFramePtsSec !== null;
+    const audioBuffered = this.audio.getBufferedSeconds();
+    const videoLead = this.#getVideoLeadSec();
+    const starving =
+      hasFrame && audioBuffered <= 0.05 && videoLead <= 0.05 &&
+      this.videoQueue.length === 0;
+
+    if (hasFrame && !starving && !this._playingFired) {
+      this._playingFired = true;
+      this._waitingFired = false;
+      this.#emit("playing", { currentTime: this.currentTime });
+    } else if (starving && !this._waitingFired) {
+      this._waitingFired = true;
+      this._playingFired = false;
+      this.#emit("waiting", { currentTime: this.currentTime });
+    }
+  }
+
+  /* ---------------- video render loop helpers ---------------- */
 
   async #waitForFlowControl() {
     while (this.running) {
