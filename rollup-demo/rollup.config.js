@@ -22,10 +22,7 @@ function copyAssets() {
       if (!existsSync(wasmDir)) {
         mkdirSync(wasmDir, { recursive: true });
       }
-      copyFileSync(
-        resolve(__dirname, "src", "wasm", "wasm_worker.js"),
-        resolve(wasmDir, "wasm_worker.js"),
-      );
+      copyFileSync(resolve(__dirname, "src", "wasm", "wasm_worker.js"), resolve(wasmDir, "wasm_worker.js"));
       // const toneSrc = resolve(__dirname, "public", "tone_440hz_1s.wav");
       // if (existsSync(toneSrc)) {
       //   copyFileSync(toneSrc, resolve(dist, "tone_440hz_1s.wav"));
@@ -41,6 +38,7 @@ export default defineConfig({
     file: "dist/index.umd.js",
     format: "umd",
     name: "HlsWasmApp",
+    sourcemap: true,
   },
   plugins: [
     copyAssets(),
