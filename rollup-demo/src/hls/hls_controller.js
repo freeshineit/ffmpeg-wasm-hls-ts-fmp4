@@ -17,9 +17,9 @@ function makeTrackState(kind, url) {
 }
 
 export class HlsController {
-  constructor({ mode = "live", lowLatency = true, followRedirectUrl = true, onSegment, onDuration, onError }) {
+  constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, onSegment, onDuration, onError }) {
     this.mode = mode;
-    this.lowLatency = lowLatency;
+    this.lowLatencyMode = lowLatencyMode;
     this.followRedirectUrl = followRedirectUrl;
     this.onSegment = onSegment;
     this.onDuration = onDuration || (() => {});
@@ -148,8 +148,8 @@ export class HlsController {
     document.removeEventListener("visibilitychange", this._onVisible);
   }
 
-  setLowLatency(value) {
-    this.lowLatency = !!value;
+  setLowLatencyMode(value) {
+    this.lowLatencyMode = !!value;
   }
 
   /* -------------------- internals -------------------- */
@@ -192,7 +192,7 @@ export class HlsController {
         }
 
         const candidates = [];
-        const useParts = this.lowLatency && info.parts.length > 0;
+        const useParts = this.lowLatencyMode && info.parts.length > 0;
         if (useParts) {
           for (const part of info.parts) candidates.push(part.url);
         } else {
@@ -209,7 +209,7 @@ export class HlsController {
 
         if (this.mode === "vod" && info.isEndList) break;
 
-        const reloadMs = this.lowLatency && info.partTarget ? Math.max(150, info.partTarget * 500) : Math.max(500, info.targetDuration * 500);
+        const reloadMs = this.lowLatencyMode && info.partTarget ? Math.max(150, info.partTarget * 500) : Math.max(500, info.targetDuration * 500);
 
         await this._sleep(track, reloadMs);
       } catch (err) {

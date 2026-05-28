@@ -287,7 +287,7 @@ export class HlsWasmPlayer {
 
     this.hls = new HlsController({
       mode: this._currentMode,
-      lowLatency: true,
+      lowLatencyMode: true,
       onDuration: (dur) => {
         const prev = this._totalDuration;
         this._totalDuration = dur;
@@ -474,7 +474,7 @@ export class HlsWasmPlayer {
   /* ============================================================== */
 
   #maybeFallbackFromLowLatency(msg) {
-    if (!this.hls || !this.hls.lowLatency || this.hevcCompatFallbackTriggered) {
+    if (!this.hls || !this.hls.lowLatencyMode || this.hevcCompatFallbackTriggered) {
       return;
     }
 
@@ -487,10 +487,10 @@ export class HlsWasmPlayer {
     }
 
     this.hevcCompatFallbackTriggered = true;
-    if (typeof this.hls.setLowLatency === "function") {
-      this.hls.setLowLatency(false);
+    if (typeof this.hls.setLowLatencyMode === "function") {
+      this.hls.setLowLatencyMode(false);
     } else {
-      this.hls.lowLatency = false;
+      this.hls.lowLatencyMode = false;
     }
     this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
