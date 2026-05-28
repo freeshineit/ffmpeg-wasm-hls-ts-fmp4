@@ -77,9 +77,18 @@ export class WasmBridge {
     if (!this.worker) {
       throw new Error("WASM worker has not been initialized.");
     }
-    
+
     // Copy bytes so we can transfer ownership to avoid blocking main thread and clone overhead
-    const bytesCopy = new Uint8Array(bytes);
+    let bytesCopy;
+    try {
+      bytesCopy = new Uint8Array(bytes);
+    } catch (err) {
+      throw new Error(
+        `Failed to copy segment buffer (${bytes.length} bytes): ${err.message}. ` +
+        `System may be under memory pressure.`
+      );
+    }
+
     this.worker.postMessage({
       type: 'feedSegment',
       payload: { bytes: bytesCopy, isInitSegment }
