@@ -1,20 +1,6 @@
-import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVariantAndAudio } from "./playlist_parser.js";
+import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVariantAndAudio } from "./playlist_parser";
 
-/**
- * Per-track fetch loop state. Each track ("muxed" | "video" | "audio")
- * carries its own seen-set, init-loaded flag and abort controller.
- */
-function makeTrackState(kind, url) {
-  return {
-    kind,
-    url,
-    seen: new Set(),
-    initLoaded: false,
-    abort: null,
-    sleepResolve: null,
-    running: false,
-  };
-}
+import Helper from "../utils/helper";
 
 export class HlsController {
   constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, onSegment, onDuration, onError }) {
@@ -82,16 +68,16 @@ export class HlsController {
         return;
       }
       console.log(`[hls] master playlist resolved: video=${variant.uri}` + (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"));
-      const videoTrack = makeTrackState("video", variant.uri);
+      const videoTrack = Helper.makeTrackState("video", variant.uri);
       this.tracks.push(videoTrack);
-      const audioTrack = audio?.uri ? makeTrackState("audio", audio.uri) : null;
+      const audioTrack = audio?.uri ? Helper.makeTrackState("audio", audio.uri) : null;
       if (audioTrack) this.tracks.push(audioTrack);
 
       const loops = this.tracks.map((t) => this._loop(t));
       await Promise.all(loops);
     } else {
       this.isMaster = false;
-      const muxedTrack = makeTrackState("muxed", this.playlistUrl);
+      const muxedTrack = Helper.makeTrackState("muxed", this.playlistUrl);
       this.tracks.push(muxedTrack);
       await this._loop(muxedTrack);
     }
