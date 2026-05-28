@@ -1,120 +1,165 @@
 <!doctype html>
 <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>HLS WASM Player (Rollup)</title>
-        <link rel="stylesheet" href="/styles.css" />
-        <script src="./wasm/decoder.js"></script>
-    </head>
-    <body>
-        <div class="app-shell">
-            <header class="topbar">
-                <h1>HLS WASM Player (Rollup)</h1>
-                <p>
-                    TS/fMP4 Soft Decode · WebGL + AudioContext · Live/VOD/LL-HLS
-                </p>
-            </header>
-
-            <main class="player-layout">
-                <section class="video-panel">
-                    <canvas id="videoCanvas" width="1280" height="720"></canvas>
-                    <div class="progress-row">
-                        <span id="progressLabel" class="progress-label"
-                            >0:00 / 0:00</span
-                        >
-                        <input
-                            type="range"
-                            id="progressBar"
-                            class="progress-bar"
-                            min="0"
-                            max="100"
-                            value="0"
-                            step="0.1"
-                        />
-                    </div>
-                    <div class="control-row">
-                        <button id="playBtn" type="button">Play</button>
-                        <button id="pauseBtn" type="button">Pause</button>
-                        <button id="loadBtn" type="button">Reload</button>
-
-                        <label class="ctrl-inline">
-                            <input id="muteToggle" type="checkbox" />
-                            <span>Mute</span>
-                        </label>
-
-                        <label class="ctrl-inline">
-                            <span>Vol</span>
-                            <input
-                                id="volumeBar"
-                                type="range"
-                                min="0"
-                                max="100"
-                                value="100"
-                                step="1"
-                            />
-                            <span id="volumeLabel" class="value-label">100%</span>
-                        </label>
-
-                        <label class="ctrl-inline">
-                            <span>Rate</span>
-                            <select id="rateSelect">
-                                <option value="0.5">0.5x</option>
-                                <option value="0.75">0.75x</option>
-                                <option value="1" selected>1x</option>
-                                <option value="1.25">1.25x</option>
-                                <option value="1.5">1.5x</option>
-                                <option value="2">2x</option>
-                            </select>
-                        </label>
-                    </div>
-                    <div class="status-row">
-                        <span class="status-pill"
-                            >state:
-                            <strong id="stateLabel">idle</strong></span
-                        >
-                        <span class="status-pill"
-                            >buffered:
-                            <strong id="bufferedLabel">0.0s</strong></span
-                        >
-                        <span class="status-pill"
-                            >ended:
-                            <strong id="endedLabel">false</strong></span
-                        >
-                    </div>
-                </section>
-
-                <aside class="control-panel">
-                    <label for="urlInput">M3U8 URL</label>
-                    <input
-                        id="urlInput"
-                        type="text"
-                        value="http://localhost:5000/h264_10s_fmp4/output_h264_fmp4.m3u8"
-                        placeholder="https://example.com/live.m3u8"
-                    />
-
-                    <label for="modeSelect">Play Mode</label>
-                    <select id="modeSelect">
-                        <option value="vod" selected>VOD</option>
-                        <option value="live">Live</option>
-                    </select>
-
-                    <div class="button-row">
-                        <button id="startBtn">Start</button>
-                        <button id="stopBtn">Stop</button>
-                    </div>
-
-                    <details class="event-panel" open>
-                        <summary>Events</summary>
-                        <pre id="eventBox" class="event-box"></pre>
-                    </details>
-
-                    <pre id="logBox" class="log-box"></pre>
-                </aside>
-            </main>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HLS WASM Player (Rollup)</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="./wasm/decoder.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ============ Header ============ -->
+      <header class="header">
+        <div class="header-left">
+          <h1>HLS WASM Player</h1>
+          <p>TS/fMP4 Soft Decode · WebGL + AudioContext · Live/VOD/LL-HLS</p>
         </div>
+        <div class="kbd-hints">
+          <span class="kbd-hint"><kbd>Space</kbd> Play / Pause</span>
+          <span class="kbd-hint"><kbd>M</kbd> Mute</span>
+          <span class="kbd-hint"><kbd>F</kbd> Fullscreen</span>
+          <span class="kbd-hint"><kbd>&larr;</kbd><kbd>&rarr;</kbd> Seek</span>
+        </div>
+      </header>
 
-        <script src="/index.umd.js"></script>
-        <script src="/demo.js"></script>
-    </body>
+      <!-- ============ Main Layout ============ -->
+      <main class="player-layout">
+        <!-- Video Panel -->
+        <section class="video-panel">
+          <div class="video-container" id="videoContainer">
+            <canvas id="videoCanvas" width="1280" height="720"></canvas>
+
+            <!-- Loading overlay -->
+            <div class="loading-overlay" id="loadingOverlay">
+              <div class="spinner"></div>
+              <span class="loading-text">Loading&hellip;</span>
+            </div>
+
+            <!-- Center play / replay button -->
+            <div class="center-play-btn" id="centerPlayBtn">
+              <!-- Play triangle -->
+              <svg viewBox="0 0 64 64" class="play-icon" id="centerPlayIcon">
+                <circle cx="32" cy="32" r="30" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" />
+                <polygon points="24,18 24,46 48,32" fill="rgba(255,255,255,0.9)" />
+              </svg>
+              <!-- Replay icon (hidden by default) -->
+              <svg viewBox="0 0 64 64" class="replay-icon" id="centerReplayIcon" style="display: none">
+                <circle cx="32" cy="32" r="30" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2" />
+                <path d="M38 18 C48 22 48 42 38 46" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="3" stroke-linecap="round" />
+                <polygon points="36,12 44,18 36,24" fill="rgba(255,255,255,0.9)" />
+              </svg>
+            </div>
+          </div>
+
+          <!-- Progress bar -->
+          <div class="progress-row">
+            <span class="progress-label" id="progressLabel">0:00 / 0:00</span>
+            <div class="progress-bar-wrapper" id="progressWrapper">
+              <span class="progress-tooltip" id="progressTooltip"></span>
+              <input type="range" class="progress-bar" id="progressBar" min="0" max="100" value="0" step="0.1" />
+            </div>
+          </div>
+
+          <!-- Control bar -->
+          <div class="control-row">
+            <!-- Play / Pause toggle -->
+            <button class="btn-icon play-pause" id="playPauseBtn" title="Play / Pause (Space)">
+              <!-- Play icon -->
+              <svg viewBox="0 0 24 24" class="icon-play">
+                <polygon points="6,3 20,12 6,21" />
+              </svg>
+              <!-- Pause icon -->
+              <svg viewBox="0 0 24 24" class="icon-pause" style="display: none">
+                <rect x="5" y="3" width="5" height="18" />
+                <rect x="14" y="3" width="5" height="18" />
+              </svg>
+            </button>
+
+            <span class="control-sep"></span>
+
+            <!-- Volume -->
+            <button class="btn-icon" id="muteBtn" title="Mute / Unmute (M)">
+              <!-- Unmuted speaker -->
+              <svg viewBox="0 0 24 24" class="icon-vol-on">
+                <polygon points="2,8 6,8 11,4 11,20 6,16 2,16" />
+                <path d="M15 9.5c1.5 1 2.5 2.7 2.5 4.5s-1 3.5-2.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              <!-- Muted speaker -->
+              <svg viewBox="0 0 24 24" class="icon-vol-off" style="display: none">
+                <polygon points="2,8 6,8 11,4 11,20 6,16 2,16" />
+                <line x1="22" y1="3" x2="14" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="14" y1="3" x2="22" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+
+            <label class="ctrl-inline">
+              <input id="volumeBar" type="range" min="0" max="100" value="100" step="1" />
+              <span id="volumeLabel" class="value-label">100%</span>
+            </label>
+
+            <span class="control-sep"></span>
+
+            <!-- Playback rate -->
+            <label class="ctrl-inline">
+              <select id="rateSelect">
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+              </select>
+            </label>
+
+            <span class="control-sep"></span>
+
+            <!-- Fullscreen -->
+            <button class="btn-icon" id="fullscreenBtn" title="Fullscreen (F)">
+              <svg viewBox="0 0 24 24">
+                <polyline points="8,3 3,3 3,8" fill="none" stroke="currentColor" stroke-width="2" />
+                <polyline points="16,21 21,21 21,16" fill="none" stroke="currentColor" stroke-width="2" />
+                <polyline points="21,8 21,3 16,3" fill="none" stroke="currentColor" stroke-width="2" />
+                <polyline points="3,16 3,21 8,21" fill="none" stroke="currentColor" stroke-width="2" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Status bar -->
+          <div class="status-row">
+            <span class="status-pill" id="statePill">state: <strong id="stateLabel">idle</strong></span>
+            <span class="status-pill">buffered: <strong id="bufferedLabel">0.0s</strong></span>
+            <span class="status-pill">ended: <strong id="endedLabel">false</strong></span>
+          </div>
+        </section>
+
+        <!-- Side Panel -->
+        <aside class="control-panel">
+          <label for="urlInput">M3U8 URL</label>
+          <input id="urlInput" type="text" value="http://localhost:5000/h264_10s_fmp4/output_h264_fmp4.m3u8" placeholder="https://example.com/live.m3u8" />
+
+          <label for="modeSelect">Play Mode</label>
+          <select id="modeSelect">
+            <option value="vod" selected>VOD</option>
+            <option value="live">Live</option>
+          </select>
+
+          <div class="button-row">
+            <button id="startBtn">Start</button>
+            <button id="stopBtn">Stop</button>
+          </div>
+
+          <details class="event-panel" open>
+            <summary>Events</summary>
+            <pre id="eventBox" class="event-box"></pre>
+          </details>
+
+          <pre id="logBox" class="log-box"></pre>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/index.umd.js"></script>
+    <script src="/demo.js"></script>
+  </body>
 </html>
