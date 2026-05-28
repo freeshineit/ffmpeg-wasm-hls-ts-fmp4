@@ -518,28 +518,28 @@ export class HlsWasmPlayer {
       cancelAnimationFrame(this.renderRafId);
     }
 
+    // For video-only streams (no audio clock) we pace by decoded-frame arrival
+    // rather than by wall-clock, so slow software decoding (large HEVC frames,
+    // 4K, etc.) doesn't make every-frame "late" and cause a frozen picture.
+    let lastRenderWallSec = 0;
+
     const tick = () => {
       if (!this.running) {
         this.renderRafId = 0;
         return;
       }
 
-      let mediaTimeSec = this.audio.getMediaTimeSec();
-      if (mediaTimeSec === null && this.videoQueue.length > 0) {
-        const nowSec = performance.now() / 1000;
-        if (this.videoClockOffsetSec === null) {
-          this.videoClockOffsetSec = this.videoQueue[0].ptsMs / 1000 - nowSec;
-        }
-        mediaTimeSec = nowSec + this.videoClockOffsetSec;
-      }
+      const audioMediaTimeSec = this.audio.getMediaTimeSec();
+      const nowSec = performance.now() / 1000;
 
-      if (mediaTimeSec !== null) {
+      if (audioMediaTimeSec !== null) {
+        // ---- A/V sync path: drive video by the audio clock ----
         let renderedThisTick = 0;
         let droppedThisTick = 0;
         while (this.videoQueue.length > 0) {
           const head = this.videoQueue[0];
           const headPtsSec = head.ptsMs / 1000;
-          const delta = headPtsSec - mediaTimeSec;
+          const delta = headPtsSec - audioMediaTimeSec;
 
           if (delta > 0.01) {
             break;
@@ -547,8 +547,6 @@ export class HlsWasmPlayer {
 
           this.videoQueue.shift();
           if (delta < -this.dropLateFrameSec) {
-            // Cap per-tick frame drops to avoid a multi-second freeze
-            // when recovering from tab-background suspension.
             if (droppedThisTick >= this.maxFrameDropsPerTick) {
               break;
             }
@@ -558,11 +556,25 @@ export class HlsWasmPlayer {
           }
           this.renderer.renderYuv420(head);
           this._lastRenderedFramePtsSec = headPtsSec;
+          lastRenderWallSec = nowSec;
           this.#maybeMarkEnded();
           renderedThisTick += 1;
           if (renderedThisTick >= 2) {
             break;
           }
+        }
+      } else if (this.videoQueue.length > 0) {
+        // ---- Video-only path: pace by frame-duration, never drop "late" ----
+        // Pull at most one frame per RAF tick, but only after the previous
+        // frame has been on screen for at least its PTS-derived duration.
+        const minIntervalSec = Math.max(5, this.videoFrameDurMs || 33.33) / 1000;
+        if (nowSec - lastRenderWallSec >= minIntervalSec * 0.9) {
+          const head = this.videoQueue.shift();
+          const headPtsSec = head.ptsMs / 1000;
+          this.renderer.renderYuv420(head);
+          this._lastRenderedFramePtsSec = headPtsSec;
+          lastRenderWallSec = nowSec;
+          this.#maybeMarkEnded();
         }
       }
 
