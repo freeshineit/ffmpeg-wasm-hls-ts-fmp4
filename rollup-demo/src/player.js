@@ -1,32 +1,9 @@
-import { WebGlRender } from "./renderer/webgl-420p.js";
-import { AudioRenderer } from "./audio/audio_renderer.js";
-import { HlsController } from "./hls/hls_controller.js";
-import { WasmBridge } from "./wasm/wasm_bridge.js";
+import { WebGlRender } from "./renderer/webgl-420p";
+import { AudioRenderer } from "./audio/audio_renderer";
+import { HlsController } from "./hls/hls_controller";
+import { WasmBridge } from "./wasm/wasm_bridge";
+import TimeRangesLite from './utils/TimeRangesLite'
 
-/**
- * Lightweight TimeRanges polyfill matching the HTMLMediaElement.buffered shape.
- * Stores [start, end] seconds pairs.
- */
-class TimeRangesLite {
-  constructor(ranges) {
-    this._ranges = ranges || [];
-    Object.defineProperty(this, "length", {
-      get: () => this._ranges.length,
-    });
-  }
-  start(i) {
-    if (i < 0 || i >= this._ranges.length) {
-      throw new Error("TimeRanges index out of range");
-    }
-    return this._ranges[i][0];
-  }
-  end(i) {
-    if (i < 0 || i >= this._ranges.length) {
-      throw new Error("TimeRanges index out of range");
-    }
-    return this._ranges[i][1];
-  }
-}
 
 export class HlsWasmPlayer {
   constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
@@ -331,6 +308,7 @@ export class HlsWasmPlayer {
     this._waitingFired = false;
     this._lastDurationFired = -1;
     this._lastEmittedTimeSec = -1;
+    this._audioTrackWarned = false;
 
     this.#emit("loadstart", { src: url, mode: this._currentMode });
 
@@ -375,8 +353,22 @@ export class HlsWasmPlayer {
           error: err,
         });
       },
-      onSegment: async (bytes, isInitSegment, segmentUrl) => {
+      onSegment: async (bytes, isInitSegment, segmentUrl, trackKind) => {
         await this.#waitForFlowControl();
+        // For now the WASM bridge consumes a single muxed/video stream.
+        // In master mode we drop standalone audio segments rather than feed
+        // them into the wrong demuxer; player.js can be extended later to
+        // route trackKind === "audio" into a separate decoding pipeline.
+        if (trackKind === "audio") {
+          if (!this._audioTrackWarned) {
+            this._audioTrackWarned = true;
+            this.log(
+              "[hls] master playlist has a separate audio rendition; " +
+                "audio chunklist segments are not yet routed into the decoder.",
+            );
+          }
+          return;
+        }
         if (!isInitSegment) {
           this.#beginSegmentInfo(segmentUrl, bytes.length);
         }
