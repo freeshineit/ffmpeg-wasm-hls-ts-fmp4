@@ -4,14 +4,25 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "ROLLUP_SERVE=false rollup -c",
-    "dev": "rollup -c -w"
+    "build": "npm run clean && cross-env NODE_ENV=production ROLLUP_SERVE=false rollup -c",
+    "dev": "npm run clean && cross-env NODE_ENV=development rollup -c -w",
+    "lint": "eslint --fix \"./src/**/*.{ts,tsx,js,jsx,mjs,vue,cjs}\"",
+    "lint:check": "eslint \"./src/**/*.{ts,tsx,js,jsx,mjs,vue,cjs}\"",
+    "fmt": "prettier --write \"./**/*.{ts,tsx,js,jsx,mjs,json,md,yml,yaml,vue,cjs,css,scss,sass}\"",
+    "fmt:check": "prettier --check \"./**/*.{ts,tsx,js,jsx,mjs,json,md,yml,yaml,vue,cjs,css,scss,sass}\"",
+    "clean": "rimraf dist"
   },
   "dependencies": {
-    "@skax/hls-io": "1.0.0-beta.1"
+    "@skax/logger": "^2.0.0"
   },
   "devDependencies": {
-    "rollup": "^4.28.0",
-    "rollup-plugin-serve": "^3.0.0"
+    "rollup": "^4.60.2",
+    "rollup-plugin-serve": "^3.0.0",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.4",
+    "eslint-config-xx": "^2.2.5",
+    "prettier": "^3.8.1",
+    "pretty-quick": "^4.2.2",
+    "rimraf": "^6.1.2"
   }
 }
