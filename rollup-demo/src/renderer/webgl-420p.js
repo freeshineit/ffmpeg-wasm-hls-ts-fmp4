@@ -87,6 +87,8 @@ export class WebGlRender {
     this.gl = gl;
     this.canvas = canvas;
 
+    this.#addEventListeners();
+
     this.program = this.#createProgram();
 
     this.verticesBuffer = gl.createBuffer();
@@ -161,6 +163,8 @@ export class WebGlRender {
       gl.deleteTexture(this.uTexture.texture);
       gl.deleteTexture(this.vTexture.texture);
 
+      this.#removeEventListener();
+
       this.gl = null;
       this.program = null;
       this.verticesBuffer = null;
@@ -220,6 +224,31 @@ export class WebGlRender {
       scratch.set(data.subarray(row * stride, row * stride + width), row * width);
     }
     return scratch.length === need ? scratch : scratch.subarray(0, need);
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // canvas event Listeners
+  // ---------------------------------------------------------------------------------------
+
+  #webglcontextlostFun(e) {
+    e.preventDefault(); // 阻止浏览器默认处理
+    console.log("WebGL 上下文丢失，等待恢复");
+  }
+
+  #webglcontextrestoredFun(e) {
+    console.log("WebGL 上下文恢复，重新初始化资源");
+    // 重新创建着色器、纹理、缓冲区等
+    // initWebGLResources();
+  }
+
+  #addEventListeners() {
+    this.canvas.addEventListener("webglcontextlost", this.#webglcontextlostFun);
+    this.canvas.addEventListener("webglcontextrestored", this.#webglcontextrestoredFun);
+  }
+
+  #removeEventListener() {
+    this.canvas.removeEventListener("webglcontextlost", this.#webglcontextlostFun);
+    this.canvas.removeEventListener("webglcontextrestored", this.#webglcontextrestoredFun);
   }
 }
 
