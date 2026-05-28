@@ -31,6 +31,7 @@ export class HlsWasmPlayer {
     this.maxAudioBufferedSec = 3.0;
     this.maxVideoLeadSec = 1.2;
     this.dropLateFrameSec = 0.2;
+    this.maxFrameDropsPerTick = 10; // prevent massive frame-drop stalls
 
     this.droppedVideoFrames = 0;
     this.lastDropLogAt = 0;
@@ -45,6 +46,7 @@ export class HlsWasmPlayer {
     this.segmentSeq = 0;
     this.segmentInfoQueue = [];
     this.maxPendingSegmentInfo = 60;
+    this.maxSegmentInfoAgeMs = 30_000; // evict entries older than 30s
     this.hevcCompatFallbackTriggered = false;
     this._totalDuration = 0;
     this._seekBaseTime = 0;
@@ -60,6 +62,9 @@ export class HlsWasmPlayer {
 
     // PTS of the most recently rendered video frame (seconds, normalized).
     this._lastRenderedFramePtsSec = null;
+
+    // Visibility-change handler for tab-background detection
+    this._onVisibilityBound = () => this.#onVisibilityChange();
 
     // Event-emission bookkeeping
     this._timeUpdateTimerId = 0;
@@ -285,6 +290,10 @@ export class HlsWasmPlayer {
 
     this.#startRenderLoop();
 
+    // Listen for tab background/foreground transitions to
+    // prevent massive frame-drop storms when rAF was suspended.
+    document.addEventListener("visibilitychange", this._onVisibilityBound);
+
     this.hls = new HlsController({
       mode: this._currentMode,
       lowLatencyMode: true,
@@ -345,6 +354,8 @@ export class HlsWasmPlayer {
       this.hls.stop();
       this.hls = null;
     }
+
+    document.removeEventListener("visibilitychange", this._onVisibilityBound);
 
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
@@ -524,6 +535,7 @@ export class HlsWasmPlayer {
 
       if (mediaTimeSec !== null) {
         let renderedThisTick = 0;
+        let droppedThisTick = 0;
         while (this.videoQueue.length > 0) {
           const head = this.videoQueue[0];
           const headPtsSec = head.ptsMs / 1000;
@@ -535,6 +547,13 @@ export class HlsWasmPlayer {
 
           this.videoQueue.shift();
           if (delta < -this.dropLateFrameSec) {
+            // Cap per-tick frame drops to avoid a multi-second freeze
+            // when recovering from tab-background suspension.
+            if (droppedThisTick >= this.maxFrameDropsPerTick) {
+              break;
+            }
+            this.droppedVideoFrames += 1;
+            droppedThisTick += 1;
             continue;
           }
           this.renderer.renderYuv420(head);
@@ -606,6 +625,43 @@ export class HlsWasmPlayer {
   }
 
   /* ---------------- video render loop helpers ---------------- */
+
+  /**
+   * Handle tab background → foreground transitions.
+   *
+   * When the tab is backgrounded the browser suspends requestAnimationFrame,
+   * but Web Audio continues to play. This means mediaTimeSec advances while
+   * videoQueue accumulates unrendered frames. On return, the accumulated
+   * frames would be far behind mediaTimeSec and all be dropped at once.
+   *
+   * We detect this by checking if the queue exceeded a healthy size and
+   * the lead frame is already stale – if so, we fast-forward the video
+   * clock and flush the irrecoverable frames so rendering can re-sync
+   * smoothly instead of freezing while dropping hundreds of frames.
+   */
+  #onVisibilityChange() {
+    if (document.visibilityState !== "visible") return;
+    if (!this.running || this.videoQueue.length === 0) return;
+
+    const mediaTimeSec = this.audio.getMediaTimeSec();
+    const headPtsSec = this.videoQueue[0].ptsMs / 1000;
+
+    // If the audio clock has advanced far beyond the oldest queued video
+    // frame (e.g. several seconds), the queue is irrecoverably stale.
+    // Flush everything behind mediaTime and reset the offset so the
+    // render loop doesn't spend ticks doing nothing but dropping frames.
+    if (mediaTimeSec !== null && mediaTimeSec - headPtsSec > 1.0) {
+      // Drop all frames whose PTS is behind mediaTime.
+      while (this.videoQueue.length > 0) {
+        const pts = this.videoQueue[0].ptsMs / 1000;
+        if (pts >= mediaTimeSec - this.dropLateFrameSec) break;
+        this.videoQueue.shift();
+        this.droppedVideoFrames += 1;
+      }
+      this.videoClockOffsetSec = null;
+      this.log(`[visibility] flushed stale video frames (${this.videoQueue.length} remaining)`);
+    }
+  }
 
   async #waitForFlowControl() {
     while (this.running) {
@@ -690,7 +746,12 @@ export class HlsWasmPlayer {
       videoInfo: null,
       audioInfo: null,
       printed: false,
+      createdAt: Date.now(),
     });
+
+    // Evict entries that exceed the age limit (e.g. single-track streams
+    // where one info type never arrives, preventing automatic flush).
+    this.#evictStaleSegmentInfos();
 
     while (this.segmentInfoQueue.length > this.maxPendingSegmentInfo) {
       const stale = this.segmentInfoQueue.shift();
@@ -768,11 +829,32 @@ export class HlsWasmPlayer {
   }
 
   #compactSegmentInfoQueue() {
+    // Evict entries that are both printed AND aged out.
+    this.#evictStaleSegmentInfos();
+
     while (this.segmentInfoQueue.length > 0) {
       const head = this.segmentInfoQueue[0];
       if (!head.printed) {
         break;
       }
+      this.segmentInfoQueue.shift();
+    }
+  }
+
+  /**
+   * Force-flush segment info entries that have been pending for too long.
+   * This handles edge cases like single-track streams (e.g. video-only)
+   * where one info type never arrives, preventing automatic flush via
+   * the normal code path.
+   */
+  #evictStaleSegmentInfos() {
+    const now = Date.now();
+    while (this.segmentInfoQueue.length > 0) {
+      const head = this.segmentInfoQueue[0];
+      if (!head.createdAt || now - head.createdAt < this.maxSegmentInfoAgeMs) {
+        break;
+      }
+      this.#flushSegmentInfo(head, true);
       this.segmentInfoQueue.shift();
     }
   }

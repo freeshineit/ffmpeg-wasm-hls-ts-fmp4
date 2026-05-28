@@ -1,6 +1,11 @@
 /**
  * Lightweight TimeRanges polyfill matching the HTMLMediaElement.buffered shape.
  * Stores [start, end] seconds pairs.
+ * @example
+ * new TimeRangesLite([[0, 10], [20, 30]])
+ *  .start(0) // 0
+ *  .end(0)   // 10
+ *
  */
 class TimeRangesLite {
   constructor(ranges) {

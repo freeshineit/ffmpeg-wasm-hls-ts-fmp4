@@ -92,16 +92,32 @@ export class AudioRenderer {
 
   setPlaybackRate(rate) {
     const r = Math.max(0.25, Math.min(4, +rate || 1));
+    const prevRate = this._playbackRate;
+    if (r === prevRate) return;
     this._playbackRate = r;
-    // Apply rate to already-scheduled but not-yet-finished sources.
-    // (Their effective end time changes; new buffered estimate updates lazily.)
+
+    // Apply rate to active sources AND recalculate nextPlayTime.
+    // Without recalculating, the next enqueueFrame would schedule at
+    // the old nextPlayTime, causing audio gaps or overlaps.
+    const now = this.audioContext ? this.audioContext.currentTime : 0;
+    let recalculatedNext = now + 0.02;
+
     for (const s of this._activeSources) {
       try {
         s.playbackRate.value = r;
+        // Each source carries _startAt and its buffer duration so we can
+        // re-derive the effective end time after the rate change.
+        if (s._startAt != null && s.buffer) {
+          const newEndsAt = s._startAt + s.buffer.duration / r;
+          s._endsAt = newEndsAt;
+          recalculatedNext = Math.max(recalculatedNext, newEndsAt);
+        }
       } catch (_) {
         // already finished
       }
     }
+
+    this.nextPlayTime = recalculatedNext;
   }
 
   async suspend() {
@@ -154,6 +170,7 @@ export class AudioRenderer {
     }
 
     source.start(startAt);
+    source._startAt = startAt;
     const effectiveDuration = audioBuffer.duration / this._playbackRate;
     const endsAt = startAt + effectiveDuration;
     source._endsAt = endsAt;
