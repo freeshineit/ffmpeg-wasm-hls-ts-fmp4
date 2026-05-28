@@ -18,9 +18,7 @@
   "use strict";
 
   if (!window.HlsWasmApp || !HlsWasmApp.HlsWasmPlayer) {
-    console.error(
-      "[demo] HlsWasmApp.HlsWasmPlayer not found. Did index.umd.js load before demo.js?",
-    );
+    console.error("[demo] HlsWasmApp.HlsWasmPlayer not found. Did index.umd.js load before demo.js?");
     return;
   }
 
@@ -59,20 +57,17 @@
   function fmtTime(sec) {
     if (!Number.isFinite(sec) || sec < 0) return "0:00";
     const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60).toString().padStart(2, "0");
+    const s = Math.floor(sec % 60)
+      .toString()
+      .padStart(2, "0");
     return `${m}:${s}`;
   }
 
   function logEvent(name, detail) {
     const now = new Date().toISOString().slice(11, 19);
-    const detailStr =
-      detail !== undefined && detail !== null
-        ? ` ${JSON.stringify(detail, replacer)}`
-        : "";
+    const detailStr = detail !== undefined && detail !== null ? ` ${JSON.stringify(detail, replacer)}` : "";
     const line = document.createElement("div");
-    line.innerHTML =
-      `[${now}] <span class="ev-name">${escapeHtml(name)}</span>` +
-      escapeHtml(detailStr);
+    line.innerHTML = `[${now}] <span class="ev-name">${escapeHtml(name)}</span>` + escapeHtml(detailStr);
     eventBox.appendChild(line);
     while (eventBox.childNodes.length > 200) {
       eventBox.removeChild(eventBox.firstChild);
@@ -81,10 +76,7 @@
   }
 
   function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   function replacer(_k, v) {
