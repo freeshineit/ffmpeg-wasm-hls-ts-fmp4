@@ -23,4 +23,4 @@ class TimeRangesLite {
   }
 }
 
-export default TimeRangesLite  
+export default TimeRangesLite;

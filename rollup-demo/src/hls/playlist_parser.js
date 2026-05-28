@@ -152,10 +152,7 @@ export function selectVariantAndAudio(master) {
   let audio = null;
   if (best.audioGroup && master.audioGroups[best.audioGroup]) {
     const group = master.audioGroups[best.audioGroup];
-    audio =
-      group.find((r) => r.default && r.uri) ||
-      group.find((r) => r.uri) ||
-      null;
+    audio = group.find((r) => r.default && r.uri) || group.find((r) => r.uri) || null;
   }
 
   return { variant: best, audio };

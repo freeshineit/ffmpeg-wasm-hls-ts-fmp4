@@ -1,9 +1,4 @@
-import {
-  classifyPlaylist,
-  parseMasterPlaylist,
-  parseMediaPlaylist,
-  selectVariantAndAudio,
-} from "./playlist_parser.js";
+import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVariantAndAudio } from "./playlist_parser.js";
 
 /**
  * Per-track fetch loop state. Each track ("muxed" | "video" | "audio")
@@ -22,20 +17,16 @@ function makeTrackState(kind, url) {
 }
 
 export class HlsController {
-  constructor({
-    mode = "live",
-    lowLatency = true,
-    onSegment,
-    onDuration,
-    onError,
-  }) {
+  constructor({ mode = "live", lowLatency = true, followRedirectUrl = true, onSegment, onDuration, onError }) {
     this.mode = mode;
     this.lowLatency = lowLatency;
+    this.followRedirectUrl = followRedirectUrl;
     this.onSegment = onSegment;
     this.onDuration = onDuration || (() => {});
     this.onError = onError || (() => {});
 
     this.playlistUrl = "";
+    this.originPlaylistUrl = "";
     this.totalDuration = 0;
 
     // Master / media flag chosen at start().
@@ -58,13 +49,18 @@ export class HlsController {
 
   async start(playlistUrl) {
     this.playlistUrl = playlistUrl;
+    this.originPlaylistUrl = playlistUrl;
     document.addEventListener("visibilitychange", this._onVisible);
 
     let firstText;
     try {
-      firstText = await this._fetchTextDirect(playlistUrl);
+      firstText = await this._fetchTextDirect(this.playlistUrl);
     } catch (err) {
-      try { this.onError(err); } catch (_) { /* ignore */ }
+      try {
+        this.onError(err);
+      } catch (_) {
+        /* ignore */
+      }
       document.removeEventListener("visibilitychange", this._onVisible);
       return;
     }
@@ -73,18 +69,19 @@ export class HlsController {
 
     if (kind === "master") {
       this.isMaster = true;
-      const master = parseMasterPlaylist(firstText, playlistUrl);
+      const master = parseMasterPlaylist(firstText, this.playlistUrl);
       const { variant, audio } = selectVariantAndAudio(master);
       if (!variant) {
         const err = new Error("Master playlist has no variants");
-        try { this.onError(err); } catch (_) { /* ignore */ }
+        try {
+          this.onError(err);
+        } catch (_) {
+          /* ignore */
+        }
         document.removeEventListener("visibilitychange", this._onVisible);
         return;
       }
-      console.log(
-        `[hls] master playlist resolved: video=${variant.uri}` +
-          (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"),
-      );
+      console.log(`[hls] master playlist resolved: video=${variant.uri}` + (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"));
       const videoTrack = makeTrackState("video", variant.uri);
       this.tracks.push(videoTrack);
       const audioTrack = audio?.uri ? makeTrackState("audio", audio.uri) : null;
@@ -94,7 +91,7 @@ export class HlsController {
       await Promise.all(loops);
     } else {
       this.isMaster = false;
-      const muxedTrack = makeTrackState("muxed", playlistUrl);
+      const muxedTrack = makeTrackState("muxed", this.playlistUrl);
       this.tracks.push(muxedTrack);
       await this._loop(muxedTrack);
     }
@@ -119,6 +116,9 @@ export class HlsController {
     for (const t of this.tracks) {
       const isPrimary = t.kind === "video" || t.kind === "muxed";
       const text = await this._fetchTextDirect(t.url);
+
+      console.warn("seekTo");
+
       const info = parseMediaPlaylist(text, t.url);
 
       let accumulated = 0;
@@ -186,10 +186,7 @@ export class HlsController {
         }
 
         if (info.initSegment && !track.initLoaded) {
-          const initData = await this._fetchBytes(
-            info.initSegment,
-            track.abort.signal,
-          );
+          const initData = await this._fetchBytes(info.initSegment, track.abort.signal);
           await this.onSegment(initData, true, info.initSegment, track.kind);
           track.initLoaded = true;
         }
@@ -212,16 +209,17 @@ export class HlsController {
 
         if (this.mode === "vod" && info.isEndList) break;
 
-        const reloadMs =
-          this.lowLatency && info.partTarget
-            ? Math.max(150, info.partTarget * 500)
-            : Math.max(500, info.targetDuration * 500);
+        const reloadMs = this.lowLatency && info.partTarget ? Math.max(150, info.partTarget * 500) : Math.max(500, info.targetDuration * 500);
 
         await this._sleep(track, reloadMs);
       } catch (err) {
         if (!track.running) break;
         console.error(`HLS loop error [${track.kind}]:`, err);
-        try { this.onError(err); } catch (_) { /* ignore */ }
+        try {
+          this.onError(err);
+        } catch (_) {
+          /* ignore */
+        }
         await this._sleep(track, 500);
       }
     }
@@ -234,6 +232,9 @@ export class HlsController {
       mode: "cors",
       credentials: "omit",
     });
+
+    console.warn("_fetchText");
+
     if (!resp.ok) throw new Error(`Failed to fetch playlist: ${resp.status}`);
     return resp.text();
   }
@@ -245,6 +246,11 @@ export class HlsController {
       mode: "cors",
       credentials: "omit",
     });
+
+    if (this.followRedirectUrl && resp?.url !== url) {
+      console.warn(`Playlist URL redirected: ${this.playlistUrl} → ${resp.url}`);
+      this.playlistUrl = resp?.url;
+    }
     if (!resp.ok) throw new Error(`Failed to fetch playlist: ${resp.status}`);
     return resp.text();
   }

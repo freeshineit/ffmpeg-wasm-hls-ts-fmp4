@@ -33,17 +33,7 @@ class Texture {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.LUMINANCE,
-      width,
-      height,
-      0,
-      gl.LUMINANCE,
-      gl.UNSIGNED_BYTE,
-      data,
-    );
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
   }
 }
 
@@ -90,9 +80,7 @@ export class WebGlRender {
       options || {},
     );
 
-    const gl =
-      canvas.getContext("webgl", contextAttributes) ||
-      canvas.getContext("experimental-webgl", contextAttributes);
+    const gl = canvas.getContext("webgl", contextAttributes) || canvas.getContext("experimental-webgl", contextAttributes);
     if (!gl) {
       throw new Error("WebGL not supported in this browser.");
     }
@@ -103,34 +91,15 @@ export class WebGlRender {
 
     this.verticesBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.verticesBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([
-        1.0, 1.0, 0.0,
-        -1.0, 1.0, 0.0,
-        1.0, -1.0, 0.0,
-        -1.0, -1.0, 0.0,
-      ]),
-      gl.STATIC_DRAW,
-    );
-    const vertexPositionAttribute = gl.getAttribLocation(
-      this.program,
-      "aVertexPosition",
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0, -1.0, 0.0, -1.0, -1.0, 0.0]), gl.STATIC_DRAW);
+    const vertexPositionAttribute = gl.getAttribLocation(this.program, "aVertexPosition");
     gl.enableVertexAttribArray(vertexPositionAttribute);
     gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 0, 0);
 
     this.texCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0]),
-      gl.STATIC_DRAW,
-    );
-    const textureCoordAttribute = gl.getAttribLocation(
-      this.program,
-      "aTextureCoord",
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0]), gl.STATIC_DRAW);
+    const textureCoordAttribute = gl.getAttribLocation(this.program, "aTextureCoord");
     gl.enableVertexAttribArray(textureCoordAttribute);
     gl.vertexAttribPointer(textureCoordAttribute, 2, gl.FLOAT, false, 0, 0);
 
@@ -196,9 +165,9 @@ export class WebGlRender {
       this.program = null;
       this.verticesBuffer = null;
       this.texCoordBuffer = null;
-        this._yScratch = null;
-        this._uScratch = null;
-        this._vScratch = null;
+      this._yScratch = null;
+      this._uScratch = null;
+      this._vScratch = null;
     } catch (err) {
       console.log("webgl destroyContext fail", err);
     }
@@ -217,9 +186,7 @@ export class WebGlRender {
     gl.shaderSource(fs, FRAGMENT_SHADER_SOURCE);
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      throw new Error(
-        gl.getShaderInfoLog(fs) || "Fragment shader compile failed",
-      );
+      throw new Error(gl.getShaderInfoLog(fs) || "Fragment shader compile failed");
     }
 
     const program = gl.createProgram();
@@ -250,10 +217,7 @@ export class WebGlRender {
       this[scratchKey] = scratch;
     }
     for (let row = 0; row < height; row += 1) {
-      scratch.set(
-        data.subarray(row * stride, row * stride + width),
-        row * width,
-      );
+      scratch.set(data.subarray(row * stride, row * stride + width), row * width);
     }
     return scratch.length === need ? scratch : scratch.subarray(0, need);
   }

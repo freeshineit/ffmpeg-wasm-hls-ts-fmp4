@@ -8,7 +8,7 @@ export { HlsWasmPlayer } from "./player.js";
 export { HlsController } from "./hls/hls_controller.js";
 export {
   parseMediaPlaylist,
-  parseMasterPlaylist,
+  // parseMasterPlaylist,
   classifyPlaylist,
   selectVariantAndAudio,
 } from "./hls/playlist_parser.js";

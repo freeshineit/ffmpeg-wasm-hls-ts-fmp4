@@ -132,11 +132,7 @@ export class AudioRenderer {
     }
 
     const { channels, sampleRate, sampleCount, pcm, ptsMs } = frame;
-    const audioBuffer = this.audioContext.createBuffer(
-      channels,
-      sampleCount,
-      sampleRate,
-    );
+    const audioBuffer = this.audioContext.createBuffer(channels, sampleCount, sampleRate);
 
     for (let ch = 0; ch < channels; ch += 1) {
       const channelData = audioBuffer.getChannelData(ch);
