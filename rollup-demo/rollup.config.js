@@ -1,4 +1,5 @@
 import { defineConfig } from "rollup";
+import typescript from "@rollup/plugin-typescript";
 import serve from "rollup-plugin-serve";
 import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -33,7 +34,7 @@ function copyAssets() {
 }
 
 export default defineConfig({
-  input: "src/main.js",
+  input: "src/main.ts",
   output: {
     file: "dist/index.umd.js",
     format: "umd",
@@ -41,6 +42,7 @@ export default defineConfig({
     sourcemap: true,
   },
   plugins: [
+    typescript({ tsconfig: "./tsconfig.json" }),
     copyAssets(),
     process.env.ROLLUP_SERVE !== "false" &&
       serve({
