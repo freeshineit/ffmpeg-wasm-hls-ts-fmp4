@@ -1,5 +1,6 @@
 import { WebGlRender } from "./renderer/webgl-420p";
 import { AudioRenderer } from "./audio/audio_renderer";
+import { Mp4AudioDecoder } from "./audio/mp4_audio_decoder";
 import { HlsController } from "./hls/hls_controller";
 import { WasmBridge } from "./wasm/wasm_bridge";
 import TimeRangesLite from "./utils/TimeRangesLite";
@@ -16,6 +17,21 @@ export class HlsWasmPlayer {
     this.renderer = new WebGlRender(canvas);
     this.audio = new AudioRenderer();
     this.wasm = new WasmBridge({ wasmJsUrl, wasmFileUrl });
+
+    // Standalone audio track (master/multivariant fMP4-AAC) is decoded by the
+    // browser via AudioContext.decodeAudioData rather than WASM. Created lazily
+    // once the audio AudioContext exists (after init()).
+    this.audioDecoder = null;
+    // True once a separate "audio" track has been observed for this session.
+    this._hasSeparateAudioTrack = false;
+    // A/V startup gate: in master mode the native audio decoder is much faster
+    // than the WASM video decoder, so audio would start ~1-2s before the first
+    // video frame and the render loop would drop all "late" early frames.
+    // We hold decoded audio PCM until the first video frame is ready (or a
+    // timeout fires for audio-only), so both clocks start at the same instant.
+    this._avGateOpen = true;
+    this._pendingAudioFrames = [];
+    this._avGateTimer = 0;
 
     this.hls = null;
     this.running = false;
@@ -73,6 +89,7 @@ export class HlsWasmPlayer {
     this._playingFired = false;
     this._waitingFired = false;
     this._lastDurationFired = -1;
+    this._audioTrackWarned = false;
   }
 
   /* ============================================================== */
@@ -194,6 +211,20 @@ export class HlsWasmPlayer {
       this.audio.setMuted(this._muted);
       this.audio.setPlaybackRate(this._playbackRate);
 
+      // Native browser decoder for a standalone fMP4-AAC audio track
+      // (master/multivariant playlists). Decoded PCM feeds the same
+      // AudioRenderer used by the WASM audio path, so the audio clock and
+      // A/V sync logic stay identical regardless of decode source.
+      this.audioDecoder = new Mp4AudioDecoder(
+        this.audio.audioContext,
+        (frame) => {
+          this.#emitAudioFrame(frame);
+        },
+        (err) => {
+          this.log(`[audio] ${err.message}`);
+        },
+      );
+
       await this.wasm.init({
         onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, isKeyFrame, codecName, yData, uData, vData) => {
           const y = yData;
@@ -216,6 +247,12 @@ export class HlsWasmPlayer {
 
           if (isKeyFrame && this.onIFrame) {
             this.onIFrame(normalizedPtsMs);
+          }
+
+          // First video frame is ready → release any audio held by the A/V gate
+          // so audio and video clocks start together.
+          if (!this._avGateOpen) {
+            this.#openAvGate();
           }
 
           this.#logSegmentVideoInfo(width, height, yStride, uStride, vStride, normalizedPtsMs, codecName);
@@ -271,6 +308,18 @@ export class HlsWasmPlayer {
     this._lastEmittedTimeSec = -1;
     this._audioTrackWarned = false;
 
+    // Arm the A/V startup gate: hold decoded audio until the first video
+    // frame renders (or the timeout fires). Released in #openAvGate.
+    this._avGateOpen = false;
+    this._pendingAudioFrames.length = 0;
+    if (this._avGateTimer) {
+      clearTimeout(this._avGateTimer);
+      this._avGateTimer = 0;
+    }
+    // Fallback: if no video frame arrives (audio-only stream or very slow
+    // video), open the gate after 2s so audio is never stuck silent.
+    this._avGateTimer = window.setTimeout(() => this.#openAvGate(), 2000);
+
     this.#emit("loadstart", { src: url, mode: this._currentMode });
 
     this.hevcCompatFallbackTriggered = false;
@@ -319,18 +368,26 @@ export class HlsWasmPlayer {
         });
       },
       onSegment: async (bytes, isInitSegment, segmentUrl, trackKind) => {
-        await this.#waitForFlowControl();
-        // For now the WASM bridge consumes a single muxed/video stream.
-        // In master mode we drop standalone audio segments rather than feed
-        // them into the wrong demuxer; player.js can be extended later to
-        // route trackKind === "audio" into a separate decoding pipeline.
+        // Standalone audio track (master/multivariant): decode via the browser
+        // using AudioContext.decodeAudioData rather than the WASM demuxer.
+        // Audio uses its OWN flow-control gate (audio buffer only) so a slow
+        // video decoder can never starve / block the audio pipeline.
         if (trackKind === "audio") {
-          if (!this._audioTrackWarned) {
-            this._audioTrackWarned = true;
-            this.log("[hls] master playlist has a separate audio rendition; " + "audio chunklist segments are not yet routed into the decoder.");
+          await this.#waitForAudioFlowControl();
+          this._hasSeparateAudioTrack = true;
+          if (!this.audioDecoder) return;
+          if (isInitSegment) {
+            this.audioDecoder.setInitSegment(bytes);
+            this.log(`audio-init: ${segmentUrl}`);
+          } else {
+            void this.audioDecoder.feedSegment(bytes);
+            this.log(`audio-seg: ${segmentUrl}`);
           }
           return;
         }
+
+        // Video / muxed track → WASM decoder, gated by the full A/V flow control.
+        await this.#waitForFlowControl();
         if (!isInitSegment) {
           this.#beginSegmentInfo(segmentUrl, bytes.length);
         }
@@ -377,6 +434,14 @@ export class HlsWasmPlayer {
 
     this.wasm.reset();
     this.audio.reset();
+    if (this.audioDecoder) this.audioDecoder.clear();
+    this._hasSeparateAudioTrack = false;
+    this._avGateOpen = true;
+    this._pendingAudioFrames.length = 0;
+    if (this._avGateTimer) {
+      clearTimeout(this._avGateTimer);
+      this._avGateTimer = 0;
+    }
     if (wasRunning) {
       this.#emit("abort", {});
     }
@@ -404,6 +469,18 @@ export class HlsWasmPlayer {
     // Reset decoder state
     this.wasm.reset();
     this.audio.reset();
+    if (this.audioDecoder) this.audioDecoder.reset();
+
+    // Re-arm the A/V startup gate so post-seek audio waits for the first
+    // decoded video frame again (prevents audio racing ahead after a seek).
+    this._avGateOpen = false;
+    this._pendingAudioFrames.length = 0;
+    if (this._avGateTimer) {
+      clearTimeout(this._avGateTimer);
+      this._avGateTimer = 0;
+    }
+    this._avGateTimer = window.setTimeout(() => this.#openAvGate(), 2000);
+
     this.videoQueue.length = 0;
     this.videoClockOffsetSec = null;
     this.lastVideoRawPtsMs = null;
@@ -675,12 +752,63 @@ export class HlsWasmPlayer {
     }
   }
 
+  /**
+   * Route a decoded audio PCM frame to the renderer, honoring the A/V startup
+   * gate. While the gate is closed (master mode, before the first video frame),
+   * frames are buffered so the audio clock does not start before video.
+   */
+  #emitAudioFrame(frame) {
+    if (!this._avGateOpen) {
+      this._pendingAudioFrames.push(frame);
+      // Safety cap: don't buffer unbounded audio if video never shows up
+      // before the timeout (the timer will open the gate anyway).
+      if (this._pendingAudioFrames.length > 400) {
+        this._pendingAudioFrames.shift();
+      }
+      return;
+    }
+    this.audio.enqueueFrame(frame);
+    this.#logSegmentAudioInfo(frame.channels, frame.sampleRate, frame.sampleCount, frame.ptsMs, "aac(native)");
+  }
+
+  /** Release buffered audio and let audio/video clocks start together. */
+  #openAvGate() {
+    if (this._avGateOpen) return;
+    this._avGateOpen = true;
+    if (this._avGateTimer) {
+      clearTimeout(this._avGateTimer);
+      this._avGateTimer = 0;
+    }
+    if (this._pendingAudioFrames.length > 0) {
+      const frames = this._pendingAudioFrames;
+      this._pendingAudioFrames = [];
+      for (const frame of frames) {
+        this.audio.enqueueFrame(frame);
+        this.#logSegmentAudioInfo(frame.channels, frame.sampleRate, frame.sampleCount, frame.ptsMs, "aac(native)");
+      }
+    }
+  }
+
   async #waitForFlowControl() {
     while (this.running) {
       const audioBuffered = this.audio.getBufferedSeconds();
       const videoLeadSec = this.#getVideoLeadSec();
       const queueOk = this.videoQueue.length <= this.videoQueueHighWatermark;
       if (audioBuffered <= this.maxAudioBufferedSec && videoLeadSec <= this.maxVideoLeadSec && queueOk) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  /**
+   * Audio-only back-pressure for the standalone audio track. Independent from
+   * the video gate so slow video decoding cannot starve audio (and vice
+   * versa). Only throttles when the scheduled audio buffer runs ahead.
+   */
+  async #waitForAudioFlowControl() {
+    while (this.running) {
+      if (this.audio.getBufferedSeconds() <= this.maxAudioBufferedSec) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
