@@ -5,45 +5,7 @@ import { Mp4AudioDecoder } from "./audio/mp4_audio_decoder";
 import { HlsController } from "./hls/hls_controller";
 import { WasmBridge } from "./wasm/wasm_bridge";
 import TimeRangesLite from "./utils/TimeRangesLite";
-
-interface HlsWasmPlayerOptions {
-  canvas: HTMLCanvasElement;
-  wasmJsUrl: string;
-  wasmFileUrl: string;
-  log?: (message: string) => void;
-  onIFrame?: (ptsMs: number) => void;
-}
-
-interface VideoFrame {
-  width: number;
-  height: number;
-  y: Uint8Array;
-  u: Uint8Array;
-  v: Uint8Array;
-  yStride: number;
-  uStride: number;
-  vStride: number;
-  ptsMs: number;
-  isKeyFrame: boolean;
-}
-
-interface AudioPcmFrame {
-  channels: number;
-  sampleRate: number;
-  sampleCount: number;
-  ptsMs: number;
-  pcm: Float32Array;
-}
-
-interface SegmentInfo {
-  id: number;
-  segmentUrl: string;
-  byteLength: number;
-  videoInfo: { width: number; height: number; yStride: number; uStride: number; vStride: number; ptsMs: number; codecName: string } | null;
-  audioInfo: { channels: number; sampleRate: number; sampleCount: number; ptsMs: number; codecName: string } | null;
-  printed: boolean;
-  createdAt: number;
-}
+import type { IAudioPcmFrame, ISegmentInfo, HlsWasmPlayerOptions, IVideoFrame } from "./types";
 
 export class HlsWasmPlayer {
   canvas!: HTMLCanvasElement;
@@ -56,13 +18,13 @@ export class HlsWasmPlayer {
   audioDecoder: Mp4AudioDecoder | null = null;
   _hasSeparateAudioTrack: boolean = false;
   _avGateOpen: boolean = true;
-  _pendingAudioFrames: AudioPcmFrame[] = [];
+  _pendingAudioFrames: IAudioPcmFrame[] = [];
   _avGateTimer: number = 0;
   hls: HlsController | null = null;
   running: boolean = false;
   _initPromise: Promise<void> | null = null;
   _initialized: boolean = false;
-  videoQueue: VideoFrame[] = [];
+  videoQueue: IVideoFrame[] = [];
   videoClockOffsetSec: number | null = null;
   renderRafId: number = 0;
   maxVideoQueueSize: number = 600;
@@ -79,7 +41,7 @@ export class HlsWasmPlayer {
   lastAudioRawPtsMs: number | null = null;
   lastAudioNormPtsMs: number | null = null;
   segmentSeq: number = 0;
-  segmentInfoQueue: SegmentInfo[] = [];
+  segmentInfoQueue: ISegmentInfo[] = [];
   maxPendingSegmentInfo: number = 60;
   maxSegmentInfoAgeMs: number = 30_000;
   hevcCompatFallbackTriggered: boolean = false;
@@ -694,7 +656,7 @@ export class HlsWasmPlayer {
     this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
 
-  #enqueueVideoFrame(frame: VideoFrame): void {
+  #enqueueVideoFrame(frame: IVideoFrame): void {
     if (!Number.isFinite(frame.ptsMs)) {
       return;
     }
@@ -869,7 +831,7 @@ export class HlsWasmPlayer {
    * gate. While the gate is closed (master mode, before the first video frame),
    * frames are buffered so the audio clock does not start before video.
    */
-  #emitAudioFrame(frame: AudioPcmFrame): void {
+  #emitAudioFrame(frame: IAudioPcmFrame): void {
     if (!this._avGateOpen) {
       this._pendingAudioFrames.push(frame);
       // Safety cap: don't buffer unbounded audio if video never shows up
@@ -1012,7 +974,7 @@ export class HlsWasmPlayer {
   }
 
   #logSegmentVideoInfo(width: number, height: number, yStride: number, uStride: number, vStride: number, ptsMs: number, codecName: string) {
-    const ctx = this.segmentInfoQueue.find((item: SegmentInfo) => !item.videoInfo);
+    const ctx = this.segmentInfoQueue.find((item: ISegmentInfo) => !item.videoInfo);
     if (!ctx) {
       return;
     }
@@ -1030,7 +992,7 @@ export class HlsWasmPlayer {
   }
 
   #logSegmentAudioInfo(channels: number, sampleRate: number, sampleCount: number, ptsMs: number, codecName: string) {
-    const ctx = this.segmentInfoQueue.find((item: SegmentInfo) => !item.audioInfo);
+    const ctx = this.segmentInfoQueue.find((item: ISegmentInfo) => !item.audioInfo);
     if (!ctx) {
       return;
     }
@@ -1045,7 +1007,7 @@ export class HlsWasmPlayer {
     this.#flushSegmentInfo(ctx, false);
   }
 
-  #flushSegmentInfo(ctx: SegmentInfo, force: boolean = false): void {
+  #flushSegmentInfo(ctx: ISegmentInfo, force: boolean = false): void {
     if (!ctx || ctx.printed) {
       return;
     }

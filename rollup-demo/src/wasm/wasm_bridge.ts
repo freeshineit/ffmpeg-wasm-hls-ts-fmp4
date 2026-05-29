@@ -1,36 +1,6 @@
-interface WasmBridgeOptions {
-  wasmJsUrl: string;
-  wasmFileUrl: string;
-}
+/* eslint-disable no-unused-vars */
 
-interface WasmInitCallbacks {
-  onVideoFrame: (
-    width: number,
-    height: number,
-    yPtr: number | null,
-    yStride: number,
-    uPtr: number | null,
-    uStride: number,
-    vPtr: number | null,
-    vStride: number,
-    ptsMs: number,
-    isKeyFrame: boolean,
-    codecName: string,
-    yData: Uint8Array,
-    uData: Uint8Array,
-    vData: Uint8Array,
-  ) => void;
-  onAudioFrame: (
-    channels: number,
-    sampleRate: number,
-    sampleCount: number,
-    dataPtr: number | null,
-    ptsMs: number,
-    codecName: string,
-    pcmData: Float32Array,
-  ) => void;
-  onLog: (level: string, msg: string) => void;
-}
+import type { WasmBridgeOptions, WasmInitCallbacks } from "../types";
 
 export class WasmBridge {
   wasmJsUrl: string;

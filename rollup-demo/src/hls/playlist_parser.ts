@@ -1,47 +1,4 @@
-type AttrMap = Record<string, string>;
-
-export interface AudioRendition {
-  groupId: string;
-  name: string;
-  default: boolean;
-  language: string | null;
-  uri: string | null;
-}
-
-export interface MasterVariant {
-  bandwidth: number;
-  codecs: string;
-  resolution: string;
-  audioGroup: string | null;
-  uri: string;
-}
-
-export interface MasterPlaylist {
-  variants: MasterVariant[];
-  audioGroups: Record<string, AudioRendition[]>;
-}
-
-export interface MediaSegment {
-  url: string;
-  duration: number;
-}
-
-export interface MediaPart {
-  url: string;
-  duration: number;
-  independent: boolean;
-}
-
-export interface MediaPlaylist {
-  targetDuration: number;
-  mediaSequence: number;
-  partTarget: number | null;
-  isEndList: boolean;
-  initSegment: string | null;
-  segments: MediaSegment[];
-  parts: MediaPart[];
-  preloadHint: string | null;
-}
+import type { AttrMap, MasterPlaylist, MasterVariant, AudioRendition, MediaPlaylist } from "../types";
 
 /**
  * Split a string on commas that lie outside double-quoted regions.

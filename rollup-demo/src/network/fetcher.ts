@@ -7,7 +7,7 @@
 
 import Helper from "../utils/helper";
 
-const DEFAULT_FETCHER_OPTIONS: RequestInit = {
+const __$DEFAULT_FETCHER_OPTIONS$__: RequestInit = {
   mode: "cors",
   credentials: "omit",
   cache: "no-store",
@@ -15,7 +15,7 @@ const DEFAULT_FETCHER_OPTIONS: RequestInit = {
 
 interface FetchWithTimeoutOptions extends RequestInit {
   timeout?: number;
-  signal?: AbortSignal;
+  // signal?: AbortSignal;
 }
 
 interface FetchTextResult {
@@ -29,7 +29,7 @@ export class Fetcher {
   _abortControllers: Map<string, AbortController>;
 
   constructor(fetchOptions: RequestInit = {}, timeout: number = 30000) {
-    this._fetchOptions = { ...DEFAULT_FETCHER_OPTIONS, ...fetchOptions };
+    this._fetchOptions = { ...__$DEFAULT_FETCHER_OPTIONS$__, ...fetchOptions };
     this._timeout = timeout;
     this._abortControllers = new Map();
   }
@@ -121,12 +121,8 @@ export class Fetcher {
 
   /* ==================== Config ==================== */
 
-  updateFetchOptions(options: RequestInit): void {
-    this._fetchOptions = { ...this._fetchOptions, ...options };
-  }
-
   setFetchOptions(options: RequestInit): void {
-    this._fetchOptions = { ...DEFAULT_FETCHER_OPTIONS, ...options };
+    this._fetchOptions = { ...this._fetchOptions, ...options };
   }
 }
 

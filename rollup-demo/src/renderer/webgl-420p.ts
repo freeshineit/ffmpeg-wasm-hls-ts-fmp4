@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 /**
  * WebGL YUV420P renderer.
  *
@@ -10,69 +11,52 @@
  * texture would sample padding bytes and the picture would shear.
  */
 
-class Texture {
-  gl: WebGLRenderingContext;
-  texture: WebGLTexture | null;
+import Texture from "./Texture";
 
-  constructor(gl: WebGLRenderingContext) {
-    this.gl = gl;
-    this.texture = gl.createTexture();
-
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  }
-
-  bind(unit: number, program: WebGLProgram, samplerName: string): void {
-    const gl = this.gl;
-    gl.activeTexture([gl.TEXTURE0, gl.TEXTURE1, gl.TEXTURE2][unit]);
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.uniform1i(gl.getUniformLocation(program, samplerName), unit);
-  }
-
-  fill(width: number, height: number, data: Uint8Array): void {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
-  }
+export interface IYUV420PFrame {
+  width: number;
+  height: number;
+  y: Uint8Array;
+  u: Uint8Array;
+  v: Uint8Array;
+  yStride: number;
+  uStride: number;
+  vStride: number;
 }
 
-const VERTEX_SHADER_SOURCE = [
-  "attribute highp vec4 aVertexPosition;",
-  "attribute vec2 aTextureCoord;",
-  "varying highp vec2 vTextureCoord;",
-  "void main(void) {",
-  "  gl_Position = aVertexPosition;",
-  "  vTextureCoord = aTextureCoord;",
-  "}",
-].join("\n");
-
-const FRAGMENT_SHADER_SOURCE = [
-  "precision highp float;",
-  "varying lowp vec2 vTextureCoord;",
-  "uniform sampler2D YTexture;",
-  "uniform sampler2D UTexture;",
-  "uniform sampler2D VTexture;",
-  "const mat4 YUV2RGB = mat4(",
-  "  1.1643828125,  0.0,           1.59602734375, -0.87078515625,",
-  "  1.1643828125, -0.39176171875,-0.81296875,     0.52959375,",
-  "  1.1643828125,  2.017234375,   0.0,           -1.081390625,",
-  "  0.0,           0.0,           0.0,            1.0",
-  ");",
-  "void main(void) {",
-  "  gl_FragColor = vec4(",
-  "    texture2D(YTexture, vTextureCoord).x,",
-  "    texture2D(UTexture, vTextureCoord).x,",
-  "    texture2D(VTexture, vTextureCoord).x,",
-  "    1.0",
-  "  ) * YUV2RGB;",
-  "}",
-].join("\n");
-
 export class WebGlRender {
+  static VERTEX_SHADER_SOURCE = [
+    "attribute highp vec4 aVertexPosition;",
+    "attribute vec2 aTextureCoord;",
+    "varying highp vec2 vTextureCoord;",
+    "void main(void) {",
+    "  gl_Position = aVertexPosition;",
+    "  vTextureCoord = aTextureCoord;",
+    "}",
+  ].join("\n");
+
+  static FRAGMENT_SHADER_SOURCE = [
+    "precision highp float;",
+    "varying lowp vec2 vTextureCoord;",
+    "uniform sampler2D YTexture;",
+    "uniform sampler2D UTexture;",
+    "uniform sampler2D VTexture;",
+    "const mat4 YUV2RGB = mat4(",
+    "  1.1643828125,  0.0,           1.59602734375, -0.87078515625,",
+    "  1.1643828125, -0.39176171875,-0.81296875,     0.52959375,",
+    "  1.1643828125,  2.017234375,   0.0,           -1.081390625,",
+    "  0.0,           0.0,           0.0,            1.0",
+    ");",
+    "void main(void) {",
+    "  gl_FragColor = vec4(",
+    "    texture2D(YTexture, vTextureCoord).x,",
+    "    texture2D(UTexture, vTextureCoord).x,",
+    "    texture2D(VTexture, vTextureCoord).x,",
+    "    1.0",
+    "  ) * YUV2RGB;",
+    "}",
+  ].join("\n");
+
   gl: WebGLRenderingContext;
   canvas: HTMLCanvasElement;
   program: WebGLProgram;
@@ -136,18 +120,9 @@ export class WebGlRender {
   /**
    * Render a YUV420P frame coming from the WASM decoder.
    *
-   * @param {{
-   *   width: number,
-   *   height: number,
-   *   y: Uint8Array,
-   *   u: Uint8Array,
-   *   v: Uint8Array,
-   *   yStride: number,
-   *   uStride: number,
-   *   vStride: number,
-   * }} frame
+   * @param {IYUV420PFrame} frame
    */
-  renderYuv420(frame: { width: number; height: number; y: Uint8Array; u: Uint8Array; v: Uint8Array; yStride: number; uStride: number; vStride: number }): void {
+  renderYuv420(frame: IYUV420PFrame): void {
     const { width, height, y, u, v, yStride, uStride, vStride } = frame;
     const cw = width >> 1;
     const ch = height >> 1;
@@ -168,7 +143,7 @@ export class WebGlRender {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  destroyContext(): void {
+  destroy(): void {
     try {
       const gl = this.gl;
       gl.deleteProgram(this.program);
@@ -196,7 +171,7 @@ export class WebGlRender {
     if (!vs) {
       throw new Error("Failed to create vertex shader");
     }
-    gl.shaderSource(vs, VERTEX_SHADER_SOURCE);
+    gl.shaderSource(vs, WebGlRender.VERTEX_SHADER_SOURCE);
     gl.compileShader(vs);
     if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
       throw new Error(gl.getShaderInfoLog(vs) || "Vertex shader compile failed");
@@ -206,7 +181,7 @@ export class WebGlRender {
     if (!fs) {
       throw new Error("Failed to create fragment shader");
     }
-    gl.shaderSource(fs, FRAGMENT_SHADER_SOURCE);
+    gl.shaderSource(fs, WebGlRender.FRAGMENT_SHADER_SOURCE);
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
       throw new Error(gl.getShaderInfoLog(fs) || "Fragment shader compile failed");

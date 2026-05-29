@@ -1,29 +1,8 @@
+/* eslint-disable no-unused-vars */
 import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVariantAndAudio } from "./playlist_parser";
 import Helper from "../utils/helper";
 import Fetcher from "../network/fetcher";
-
-type TrackKind = "video" | "audio" | "muxed";
-
-interface TrackState {
-  kind: TrackKind;
-  url: string;
-  seen: Set<string>;
-  initLoaded: boolean;
-  abort: AbortController | null;
-  sleepResolve: (() => void) | null;
-  running: boolean;
-}
-
-interface HlsControllerOptions {
-  mode?: "live" | "vod";
-  lowLatencyMode?: boolean;
-  followRedirectUrl?: boolean;
-  requestInit?: RequestInit | null;
-  fetchTimeout?: number;
-  onSegment: (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: TrackKind) => Promise<void> | void;
-  onDuration?: (duration: number) => void;
-  onError?: (error: unknown) => void;
-}
+import type { TrackState, HlsControllerOptions, HlsControllerOnSegment } from "../types";
 
 export class HlsController {
   /**
@@ -41,7 +20,7 @@ export class HlsController {
   lowLatencyMode: boolean;
   followRedirectUrl: boolean;
   fetcher: Fetcher;
-  onSegment: (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: TrackKind) => Promise<void> | void;
+  onSegment: HlsControllerOnSegment;
   onDuration: (duration: number) => void;
   onError: (error: unknown) => void;
 
@@ -188,7 +167,7 @@ export class HlsController {
 
   /** Merge additional options into the existing fetch config. */
   updateRequestInit(options: RequestInit): void {
-    this.fetcher.updateFetchOptions(options || {});
+    this.fetcher.setFetchOptions(options || {});
   }
 
   /* -------------------- internals -------------------- */
