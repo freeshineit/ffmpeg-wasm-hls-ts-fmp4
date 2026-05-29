@@ -1,12 +1,24 @@
 import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVariantAndAudio } from "./playlist_parser";
-
 import Helper from "../utils/helper";
+import Fetcher from "../network/fetcher";
 
 export class HlsController {
-  constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, onSegment, onDuration, onError }) {
+  /**
+   * @param {object} opts
+   * @param {"live"|"vod"} [opts.mode]
+   * @param {boolean} [opts.lowLatencyMode]
+   * @param {boolean} [opts.followRedirectUrl]
+   * @param {RequestInit} [opts.requestInit] Custom RequestInit merged into every fetch.
+   * @param {number} [opts.fetchTimeout] Per-request timeout in ms (default 30000).
+   * @param {Function} opts.onSegment
+   * @param {Function} [opts.onDuration]
+   * @param {Function} [opts.onError]
+   */
+  constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, requestInit = null, fetchTimeout = 30000, onSegment, onDuration, onError }) {
     this.mode = mode;
     this.lowLatencyMode = lowLatencyMode;
     this.followRedirectUrl = followRedirectUrl;
+    this.fetcher = new Fetcher(requestInit || {}, fetchTimeout);
     this.onSegment = onSegment;
     this.onDuration = onDuration || (() => {});
     this.onError = onError || (() => {});
@@ -15,9 +27,8 @@ export class HlsController {
     this.originPlaylistUrl = "";
     this.totalDuration = 0;
 
-    // Master / media flag chosen at start().
     this.isMaster = false;
-    this.tracks = []; // array of track states; one entry in media mode, two in master mode
+    this.tracks = [];
 
     this._onVisible = () => {
       if (document.visibilityState === "visible") {
@@ -40,11 +51,16 @@ export class HlsController {
 
     let firstText;
     try {
-      firstText = await this._fetchTextDirect(this.playlistUrl);
+      const result = await this.fetcher.fetchText(this.playlistUrl);
+      firstText = result.text;
+      if (this.followRedirectUrl && result.url !== this.playlistUrl) {
+        console.warn(`[hls] Playlist URL redirected: ${this.playlistUrl} → ${result.url}`);
+        this.playlistUrl = result.url;
+      }
     } catch (err) {
       try {
         this.onError(err);
-      } catch (_) {
+      } catch (_e) {
         /* ignore */
       }
       document.removeEventListener("visibilitychange", this._onVisible);
@@ -61,20 +77,19 @@ export class HlsController {
         const err = new Error("Master playlist has no variants");
         try {
           this.onError(err);
-        } catch (_) {
+        } catch (_e) {
           /* ignore */
         }
         document.removeEventListener("visibilitychange", this._onVisible);
         return;
       }
-      console.log(`[hls] master playlist resolved: video=${variant.uri}` + (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"));
+      console.warn(`[hls] master playlist resolved: video=${variant.uri}` + (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"));
       const videoTrack = Helper.makeTrackState("video", variant.uri);
       this.tracks.push(videoTrack);
-      const audioTrack = audio?.uri ? Helper.makeTrackState("audio", audio.uri) : null;
-      if (audioTrack) this.tracks.push(audioTrack);
-
-      const loops = this.tracks.map((t) => this._loop(t));
-      await Promise.all(loops);
+      if (audio?.uri) {
+        this.tracks.push(Helper.makeTrackState("audio", audio.uri));
+      }
+      await Promise.all(this.tracks.map((t) => this._loop(t)));
     } else {
       this.isMaster = false;
       const muxedTrack = Helper.makeTrackState("muxed", this.playlistUrl);
@@ -85,15 +100,9 @@ export class HlsController {
     document.removeEventListener("visibilitychange", this._onVisible);
   }
 
-  /**
-   * Seek to a target time (seconds).
-   * Restarts every track loop from its corresponding segment.
-   * Returns the segment start time computed for the primary (video / muxed) track.
-   */
   async seekTo(targetTimeSec) {
     if (this.tracks.length === 0) return 0;
 
-    // Stop all loops first.
     for (const t of this.tracks) this._abortTrack(t);
 
     let primaryStart = 0;
@@ -101,11 +110,8 @@ export class HlsController {
 
     for (const t of this.tracks) {
       const isPrimary = t.kind === "video" || t.kind === "muxed";
-      const text = await this._fetchTextDirect(t.url);
-
-      console.warn("seekTo");
-
-      const info = parseMediaPlaylist(text, t.url);
+      const result = await this.fetcher.fetchText(t.url);
+      const info = parseMediaPlaylist(result.text, t.url);
 
       let accumulated = 0;
       t.seen = new Set();
@@ -116,14 +122,11 @@ export class HlsController {
       }
       t.initLoaded = false;
       if (targetTimeSec <= 0) t.seen.clear();
-
       if (isPrimary) primaryStart = accumulated;
 
-      // Resume in background.
       restarts.push(this._loop(t));
     }
 
-    // Don't wait — return primaryStart immediately so the player can rebase PTS.
     Promise.all(restarts).catch(() => {});
     return primaryStart;
   }
@@ -131,6 +134,7 @@ export class HlsController {
   stop() {
     for (const t of this.tracks) this._abortTrack(t);
     this.tracks.length = 0;
+    this.fetcher.cancelAll();
     document.removeEventListener("visibilitychange", this._onVisible);
   }
 
@@ -138,13 +142,22 @@ export class HlsController {
     this.lowLatencyMode = !!value;
   }
 
+  /** Update the base RequestInit used for all subsequent fetches. */
+  setRequestInit(requestInit) {
+    this.fetcher.setFetchOptions(requestInit || {});
+  }
+
+  /** Merge additional options into the existing fetch config. */
+  updateRequestInit(options) {
+    this.fetcher.updateFetchOptions(options || {});
+  }
+
   /* -------------------- internals -------------------- */
 
   _abortTrack(track) {
     track.running = false;
-    if (track.abort) {
-      track.abort.abort();
-      track.abort = null;
+    if (track.url) {
+      this.fetcher.cancelRequest(track.url);
     }
     if (track.sleepResolve) {
       track.sleepResolve();
@@ -154,14 +167,12 @@ export class HlsController {
 
   async _loop(track) {
     track.running = true;
-    track.abort = new AbortController();
 
     while (track.running) {
       try {
-        const text = await this._fetchText(track.url, track.abort.signal);
-        const info = parseMediaPlaylist(text, track.url);
+        const result = await this.fetcher.fetchText(track.url);
+        const info = parseMediaPlaylist(result.text, track.url);
 
-        // Duration reporting: only the primary (video / muxed) track drives onDuration.
         if (track.kind === "video" || track.kind === "muxed") {
           let durationSum = 0;
           for (const seg of info.segments) durationSum += seg.duration;
@@ -172,7 +183,7 @@ export class HlsController {
         }
 
         if (info.initSegment && !track.initLoaded) {
-          const initData = await this._fetchBytes(info.initSegment, track.abort.signal);
+          const initData = await this.fetcher.fetchBytes(info.initSegment);
           await this.onSegment(initData, true, info.initSegment, track.kind);
           track.initLoaded = true;
         }
@@ -189,67 +200,25 @@ export class HlsController {
         for (const url of candidates) {
           if (track.seen.has(url)) continue;
           track.seen.add(url);
-          const bytes = await this._fetchBytes(url, track.abort.signal);
+          const bytes = await this.fetcher.fetchBytes(url);
           await this.onSegment(bytes, false, url, track.kind);
         }
 
         if (this.mode === "vod" && info.isEndList) break;
 
         const reloadMs = this.lowLatencyMode && info.partTarget ? Math.max(150, info.partTarget * 500) : Math.max(500, info.targetDuration * 500);
-
         await this._sleep(track, reloadMs);
       } catch (err) {
         if (!track.running) break;
-        console.error(`HLS loop error [${track.kind}]:`, err);
+        console.error(`[hls] loop error [${track.kind}]:`, err);
         try {
           this.onError(err);
-        } catch (_) {
+        } catch (_e) {
           /* ignore */
         }
         await this._sleep(track, 500);
       }
     }
-  }
-
-  async _fetchText(url, signal) {
-    const resp = await fetch(url, {
-      signal,
-      cache: "no-store",
-      mode: "cors",
-      credentials: "omit",
-    });
-
-    console.warn("_fetchText");
-
-    if (!resp.ok) throw new Error(`Failed to fetch playlist: ${resp.status}`);
-    return resp.text();
-  }
-
-  /** Fetch playlist text without binding to a per-track AbortController. */
-  async _fetchTextDirect(url) {
-    const resp = await fetch(url, {
-      cache: "no-store",
-      mode: "cors",
-      credentials: "omit",
-    });
-
-    if (this.followRedirectUrl && resp?.url !== url) {
-      console.warn(`Playlist URL redirected: ${this.playlistUrl} → ${resp.url}`);
-      this.playlistUrl = resp?.url;
-    }
-    if (!resp.ok) throw new Error(`Failed to fetch playlist: ${resp.status}`);
-    return resp.text();
-  }
-
-  async _fetchBytes(url, signal) {
-    const resp = await fetch(url, {
-      signal,
-      cache: "no-store",
-      mode: "cors",
-      credentials: "omit",
-    });
-    if (!resp.ok) throw new Error(`Failed to fetch segment: ${resp.status}`);
-    return new Uint8Array(await resp.arrayBuffer());
   }
 
   _sleep(track, ms) {
