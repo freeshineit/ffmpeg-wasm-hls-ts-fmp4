@@ -14,8 +14,93 @@ interface HlsWasmPlayerOptions {
   onIFrame?: (ptsMs: number) => void;
 }
 
+interface VideoFrame {
+  width: number;
+  height: number;
+  y: Uint8Array;
+  u: Uint8Array;
+  v: Uint8Array;
+  yStride: number;
+  uStride: number;
+  vStride: number;
+  ptsMs: number;
+  isKeyFrame: boolean;
+}
+
+interface AudioPcmFrame {
+  channels: number;
+  sampleRate: number;
+  sampleCount: number;
+  ptsMs: number;
+  pcm: Float32Array;
+}
+
+interface SegmentInfo {
+  id: number;
+  segmentUrl: string;
+  byteLength: number;
+  videoInfo: { width: number; height: number; yStride: number; uStride: number; vStride: number; ptsMs: number; codecName: string } | null;
+  audioInfo: { channels: number; sampleRate: number; sampleCount: number; ptsMs: number; codecName: string } | null;
+  printed: boolean;
+  createdAt: number;
+}
+
 export class HlsWasmPlayer {
-  [key: string]: any;
+  canvas!: HTMLCanvasElement;
+  log!: (message: string) => void;
+  onIFrame: ((ptsMs: number) => void) | undefined;
+  _events!: EventTarget;
+  renderer!: WebGlRender;
+  audio!: AudioRenderer;
+  wasm!: WasmBridge;
+  audioDecoder: Mp4AudioDecoder | null = null;
+  _hasSeparateAudioTrack: boolean = false;
+  _avGateOpen: boolean = true;
+  _pendingAudioFrames: AudioPcmFrame[] = [];
+  _avGateTimer: number = 0;
+  hls: HlsController | null = null;
+  running: boolean = false;
+  _initPromise: Promise<void> | null = null;
+  _initialized: boolean = false;
+  videoQueue: VideoFrame[] = [];
+  videoClockOffsetSec: number | null = null;
+  renderRafId: number = 0;
+  maxVideoQueueSize: number = 600;
+  videoQueueHighWatermark: number = 300;
+  maxAudioBufferedSec: number = 3.0;
+  maxVideoLeadSec: number = 1.2;
+  dropLateFrameSec: number = 0.2;
+  maxFrameDropsPerTick: number = 10;
+  droppedVideoFrames: number = 0;
+  lastDropLogAt: number = 0;
+  lastVideoRawPtsMs: number | null = null;
+  lastVideoNormPtsMs: number | null = null;
+  videoFrameDurMs: number = 33.33;
+  lastAudioRawPtsMs: number | null = null;
+  lastAudioNormPtsMs: number | null = null;
+  segmentSeq: number = 0;
+  segmentInfoQueue: SegmentInfo[] = [];
+  maxPendingSegmentInfo: number = 60;
+  maxSegmentInfoAgeMs: number = 30_000;
+  hevcCompatFallbackTriggered: boolean = false;
+  _totalDuration: number = 0;
+  _seekBaseTime: number = 0;
+  _currentSrc: string = "";
+  _currentMode: "live" | "vod" = "vod";
+  _paused: boolean = true;
+  _ended: boolean = false;
+  _volume: number = 1.0;
+  _muted: boolean = false;
+  _playbackRate: number = 1.0;
+  _lastRenderedFramePtsSec: number | null = null;
+  _onVisibilityBound!: () => void;
+  _timeUpdateTimerId: number = 0;
+  _lastEmittedTimeSec: number = -1;
+  _loadedMetadataFired: boolean = false;
+  _playingFired: boolean = false;
+  _waitingFired: boolean = false;
+  _lastDurationFired: number = -1;
+  _audioTrackWarned: boolean = false;
 
   constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }: HlsWasmPlayerOptions) {
     this.canvas = canvas;
@@ -130,7 +215,7 @@ export class HlsWasmPlayer {
   /* ============================================================== */
 
   /** Current playback position in seconds, sourced from rendered video frame. */
-  get currentTime() {
+  get currentTime(): number {
     if (this._lastRenderedFramePtsSec !== null) {
       return this._lastRenderedFramePtsSec + this._seekBaseTime;
     }
@@ -143,14 +228,14 @@ export class HlsWasmPlayer {
   }
 
   /** Total duration in seconds (from playlist), or Infinity for live. */
-  get duration() {
+  get duration(): number {
     if (this._currentMode === "live" && !this._totalDuration) {
       return Infinity;
     }
     return this._totalDuration || 0;
   }
 
-  get muted() {
+  get muted(): boolean {
     return this._muted;
   }
   set muted(v: boolean) {
@@ -161,7 +246,7 @@ export class HlsWasmPlayer {
     this.#emit("volumechange", { volume: this._volume, muted: this._muted });
   }
 
-  get volume() {
+  get volume(): number {
     return this._volume;
   }
   set volume(v: number) {
@@ -172,7 +257,7 @@ export class HlsWasmPlayer {
     this.#emit("volumechange", { volume: this._volume, muted: this._muted });
   }
 
-  get playbackRate() {
+  get playbackRate(): number {
     return this._playbackRate;
   }
   set playbackRate(r: number) {
@@ -184,11 +269,11 @@ export class HlsWasmPlayer {
   }
 
   /** True once VOD playback has reached the end of the playlist timeline. */
-  get ended() {
+  get ended(): boolean {
     return this._ended;
   }
 
-  get paused() {
+  get paused(): boolean {
     return this._paused;
   }
 
@@ -196,7 +281,7 @@ export class HlsWasmPlayer {
    * TimeRanges of buffered media, mimicking HTMLMediaElement.buffered.
    * Approximation: [currentTime, currentTime + audioBuffered + videoLead].
    */
-  get buffered() {
+  get buffered(): TimeRangesLite {
     const cur = this.currentTime;
     const audioAhead = this.audio.getBufferedSeconds();
     const videoAhead = this.#getVideoLeadSec();
@@ -211,7 +296,7 @@ export class HlsWasmPlayer {
   /* Lifecycle                                                       */
   /* ============================================================== */
 
-  async init() {
+  async init(): Promise<void> {
     if (this._initPromise) {
       return this._initPromise;
     }
@@ -309,7 +394,7 @@ export class HlsWasmPlayer {
     return this._initPromise;
   }
 
-  async start(url: string, mode: "live" | "vod" = "vod") {
+  async start(url: string, mode: "live" | "vod" = "vod"): Promise<void> {
     if (!this._initialized && this._initPromise) {
       this.log("Waiting for WASM initialization...");
       await this._initPromise;
@@ -427,7 +512,7 @@ export class HlsWasmPlayer {
     this.#startTimeUpdate();
   }
 
-  async stop() {
+  async stop(): Promise<void> {
     const wasRunning = this.running;
     this.running = false;
     this._paused = true;
@@ -474,7 +559,7 @@ export class HlsWasmPlayer {
     this.log("Playback stopped.");
   }
 
-  async destroy() {
+  async destroy(): Promise<void> {
     await this.stop();
     this.wasm.destroy();
     this._initialized = false;
@@ -482,7 +567,7 @@ export class HlsWasmPlayer {
   }
 
   /** Seek to a target time (seconds). */
-  async seek(timeSec: number) {
+  async seek(timeSec: number): Promise<void> {
     if (!this.running || !this.hls) {
       this.log("Cannot seek: not playing.");
       return;
@@ -529,7 +614,7 @@ export class HlsWasmPlayer {
   /* ============================================================== */
 
   /** Resume playback. If never started, this is a no-op (use `start()` first). */
-  async play() {
+  async play(): Promise<void> {
     if (!this.hls) {
       // Mirror HTMLMediaElement: play() on an unloaded element is a no-op
       // (we don't auto-load because we don't know what URL to use).
@@ -548,7 +633,7 @@ export class HlsWasmPlayer {
   }
 
   /** Pause playback (audio + render loop), keep buffers and HLS state. */
-  async pause() {
+  async pause(): Promise<void> {
     if (this._paused) return;
     this._paused = true;
     this.running = false;
@@ -561,7 +646,7 @@ export class HlsWasmPlayer {
   }
 
   /** Reload the current source. Equivalent to stop() + start(currentSrc). */
-  async load() {
+  async load(): Promise<void> {
     if (!this._currentSrc) {
       this.log("load() ignored: no current source.");
       return;
@@ -575,11 +660,11 @@ export class HlsWasmPlayer {
   /* Backward-compatible helpers                                     */
   /* ============================================================== */
 
-  getCurrentTime() {
+  getCurrentTime(): number {
     return this.currentTime;
   }
 
-  getTotalDuration() {
+  getTotalDuration(): number {
     return this._totalDuration || 0;
   }
 
@@ -587,7 +672,7 @@ export class HlsWasmPlayer {
   /* Internals                                                       */
   /* ============================================================== */
 
-  #maybeFallbackFromLowLatency(msg: string) {
+  #maybeFallbackFromLowLatency(msg: string): void {
     if (!this.hls || !this.hls.lowLatencyMode || this.hevcCompatFallbackTriggered) {
       return;
     }
@@ -609,14 +694,14 @@ export class HlsWasmPlayer {
     this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
 
-  #enqueueVideoFrame(frame: { ptsMs: number; width: number; height: number; y: Uint8Array; u: Uint8Array; v: Uint8Array; yStride: number; uStride: number; vStride: number; isKeyFrame: boolean }) {
+  #enqueueVideoFrame(frame: VideoFrame): void {
     if (!Number.isFinite(frame.ptsMs)) {
       return;
     }
     this.videoQueue.push(frame);
   }
 
-  #startRenderLoop() {
+  #startRenderLoop(): void {
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
     }
@@ -673,6 +758,7 @@ export class HlsWasmPlayer {
         const minIntervalSec = Math.max(5, this.videoFrameDurMs || 33.33) / 1000;
         if (nowSec - lastRenderWallSec >= minIntervalSec * 0.9) {
           const head = this.videoQueue.shift();
+          if (!head) return;
           const headPtsSec = head.ptsMs / 1000;
           this.renderer.renderYuv420(head);
           this._lastRenderedFramePtsSec = headPtsSec;
@@ -687,7 +773,7 @@ export class HlsWasmPlayer {
     this.renderRafId = requestAnimationFrame(tick);
   }
 
-  #maybeMarkEnded() {
+  #maybeMarkEnded(): void {
     if (this._currentMode !== "vod") return;
     if (this._ended) return;
     if (!this._totalDuration) return;
@@ -701,7 +787,7 @@ export class HlsWasmPlayer {
 
   /* ---------------- timeupdate / playing / waiting ---------------- */
 
-  #startTimeUpdate() {
+  #startTimeUpdate(): void {
     this.#stopTimeUpdate();
     this._timeUpdateTimerId = window.setInterval(() => {
       const t = this.currentTime;
@@ -714,14 +800,14 @@ export class HlsWasmPlayer {
     }, 250);
   }
 
-  #stopTimeUpdate() {
+  #stopTimeUpdate(): void {
     if (this._timeUpdateTimerId) {
       clearInterval(this._timeUpdateTimerId);
       this._timeUpdateTimerId = 0;
     }
   }
 
-  #updatePlayingWaitingState() {
+  #updatePlayingWaitingState(): void {
     if (this._paused || this._ended) return;
     const hasFrame = this._lastRenderedFramePtsSec !== null;
     const audioBuffered = this.audio.getBufferedSeconds();
@@ -754,7 +840,7 @@ export class HlsWasmPlayer {
    * clock and flush the irrecoverable frames so rendering can re-sync
    * smoothly instead of freezing while dropping hundreds of frames.
    */
-  #onVisibilityChange() {
+  #onVisibilityChange(): void {
     if (document.visibilityState !== "visible") return;
     if (!this.running || this.videoQueue.length === 0) return;
 
@@ -783,7 +869,7 @@ export class HlsWasmPlayer {
    * gate. While the gate is closed (master mode, before the first video frame),
    * frames are buffered so the audio clock does not start before video.
    */
-  #emitAudioFrame(frame: { channels: number; sampleRate: number; sampleCount: number; ptsMs: number; pcm: Float32Array }) {
+  #emitAudioFrame(frame: AudioPcmFrame): void {
     if (!this._avGateOpen) {
       this._pendingAudioFrames.push(frame);
       // Safety cap: don't buffer unbounded audio if video never shows up
@@ -798,7 +884,7 @@ export class HlsWasmPlayer {
   }
 
   /** Release buffered audio and let audio/video clocks start together. */
-  #openAvGate() {
+  #openAvGate(): void {
     if (this._avGateOpen) return;
     this._avGateOpen = true;
     if (this._avGateTimer) {
@@ -815,7 +901,7 @@ export class HlsWasmPlayer {
     }
   }
 
-  async #waitForFlowControl() {
+  async #waitForFlowControl(): Promise<void> {
     while (this.running) {
       const audioBuffered = this.audio.getBufferedSeconds();
       const videoLeadSec = this.#getVideoLeadSec();
@@ -832,7 +918,7 @@ export class HlsWasmPlayer {
    * the video gate so slow video decoding cannot starve audio (and vice
    * versa). Only throttles when the scheduled audio buffer runs ahead.
    */
-  async #waitForAudioFlowControl() {
+  async #waitForAudioFlowControl(): Promise<void> {
     while (this.running) {
       if (this.audio.getBufferedSeconds() <= this.maxAudioBufferedSec) {
         return;
@@ -841,7 +927,7 @@ export class HlsWasmPlayer {
     }
   }
 
-  #getVideoLeadSec() {
+  #getVideoLeadSec(): number {
     if (this.videoQueue.length === 0) {
       return 0;
     }
@@ -853,7 +939,7 @@ export class HlsWasmPlayer {
     return Math.max(0, tailPtsSec - mediaTimeSec);
   }
 
-  #normalizeVideoPts(rawPtsMs: number) {
+  #normalizeVideoPts(rawPtsMs: number): number {
     const hasRaw = Number.isFinite(rawPtsMs);
     if (this.lastVideoNormPtsMs === null) {
       this.lastVideoRawPtsMs = hasRaw ? rawPtsMs : 0;
@@ -877,7 +963,7 @@ export class HlsWasmPlayer {
     return this.lastVideoNormPtsMs;
   }
 
-  #normalizeAudioPts(rawPtsMs: number, sampleCount: number, sampleRate: number) {
+  #normalizeAudioPts(rawPtsMs: number, sampleCount: number, sampleRate: number): number {
     const frameDurMs = sampleRate > 0 ? (sampleCount * 1000) / sampleRate : 20;
     const hasRaw = Number.isFinite(rawPtsMs);
 
@@ -902,7 +988,7 @@ export class HlsWasmPlayer {
     return this.lastAudioNormPtsMs;
   }
 
-  #beginSegmentInfo(segmentUrl: string, byteLength: number) {
+  #beginSegmentInfo(segmentUrl: string, byteLength: number): void {
     this.#flushHeadSegmentInfo();
 
     this.segmentInfoQueue.push({
@@ -921,12 +1007,12 @@ export class HlsWasmPlayer {
 
     while (this.segmentInfoQueue.length > this.maxPendingSegmentInfo) {
       const stale = this.segmentInfoQueue.shift();
-      this.#flushSegmentInfo(stale, true);
+      if (stale) this.#flushSegmentInfo(stale, true);
     }
   }
 
   #logSegmentVideoInfo(width: number, height: number, yStride: number, uStride: number, vStride: number, ptsMs: number, codecName: string) {
-    const ctx = this.segmentInfoQueue.find((item: any) => !item.videoInfo);
+    const ctx = this.segmentInfoQueue.find((item: SegmentInfo) => !item.videoInfo);
     if (!ctx) {
       return;
     }
@@ -944,7 +1030,7 @@ export class HlsWasmPlayer {
   }
 
   #logSegmentAudioInfo(channels: number, sampleRate: number, sampleCount: number, ptsMs: number, codecName: string) {
-    const ctx = this.segmentInfoQueue.find((item: any) => !item.audioInfo);
+    const ctx = this.segmentInfoQueue.find((item: SegmentInfo) => !item.audioInfo);
     if (!ctx) {
       return;
     }
@@ -959,7 +1045,7 @@ export class HlsWasmPlayer {
     this.#flushSegmentInfo(ctx, false);
   }
 
-  #flushSegmentInfo(ctx: any, force = false) {
+  #flushSegmentInfo(ctx: SegmentInfo, force: boolean = false): void {
     if (!ctx || ctx.printed) {
       return;
     }
@@ -981,20 +1067,20 @@ export class HlsWasmPlayer {
     this.#compactSegmentInfoQueue();
   }
 
-  #flushHeadSegmentInfo() {
+  #flushHeadSegmentInfo(): void {
     if (this.segmentInfoQueue.length === 0) {
       return;
     }
     this.#flushSegmentInfo(this.segmentInfoQueue[0], true);
   }
 
-  #flushPendingSegmentInfos() {
+  #flushPendingSegmentInfos(): void {
     for (const item of this.segmentInfoQueue) {
       this.#flushSegmentInfo(item, true);
     }
   }
 
-  #compactSegmentInfoQueue() {
+  #compactSegmentInfoQueue(): void {
     // Evict entries that are both printed AND aged out.
     this.#evictStaleSegmentInfos();
 
@@ -1013,7 +1099,7 @@ export class HlsWasmPlayer {
    * where one info type never arrives, preventing automatic flush via
    * the normal code path.
    */
-  #evictStaleSegmentInfos() {
+  #evictStaleSegmentInfos(): void {
     const now = Date.now();
     while (this.segmentInfoQueue.length > 0) {
       const head = this.segmentInfoQueue[0];
@@ -1025,7 +1111,7 @@ export class HlsWasmPlayer {
     }
   }
 
-  #shortSegmentName(segmentUrl: string) {
+  #shortSegmentName(segmentUrl: string): string {
     try {
       const url = new URL(segmentUrl);
       const parts = url.pathname.split("/");

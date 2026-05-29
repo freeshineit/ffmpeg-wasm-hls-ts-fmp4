@@ -33,7 +33,7 @@ export class AudioRenderer {
     this._unlockBound = null;
   }
 
-  async init() {
+  async init(): Promise<void> {
     if (this.audioContext) {
       return this._tryResume();
     }
@@ -66,7 +66,7 @@ export class AudioRenderer {
     return this._tryResume();
   }
 
-  async _tryResume() {
+  async _tryResume(): Promise<void> {
     if (!this.audioContext) return;
     if (this.audioContext.state !== "running") {
       try {
@@ -79,7 +79,7 @@ export class AudioRenderer {
   }
 
   /** Silent oscillator → gain=0 → destination. Keeps AudioContext running. */
-  _startKeepAlive() {
+  _startKeepAlive(): void {
     if (!this.audioContext) return;
     this._keepAliveOsc = this.audioContext.createOscillator();
     this._keepAliveGain = this.audioContext.createGain();
@@ -136,7 +136,7 @@ export class AudioRenderer {
     this.nextPlayTime = recalculatedNext;
   }
 
-  async suspend() {
+  async suspend(): Promise<void> {
     if (this.audioContext && this.audioContext.state === "running") {
       try {
         await this.audioContext.suspend();
@@ -146,7 +146,7 @@ export class AudioRenderer {
     }
   }
 
-  async resume() {
+  async resume(): Promise<void> {
     if (this.audioContext && this.audioContext.state !== "running") {
       try {
         await this.audioContext.resume();
@@ -201,21 +201,21 @@ export class AudioRenderer {
 
   /* ---------------- Clock helpers ---------------- */
 
-  getBufferedSeconds() {
+  getBufferedSeconds(): number {
     if (!this.audioContext) {
       return 0;
     }
     return Math.max(0, this.nextPlayTime - this.audioContext.currentTime);
   }
 
-  getMediaTimeSec() {
+  getMediaTimeSec(): number | null {
     if (!this.audioContext || this.mediaOffsetSec === null) {
       return null;
     }
     return this.audioContext.currentTime + this.mediaOffsetSec;
   }
 
-  reset() {
+  reset(): void {
     for (const s of this._activeSources) {
       try {
         s.stop();
@@ -229,7 +229,7 @@ export class AudioRenderer {
     this.mediaOffsetSec = null;
   }
 
-  destroy() {
+  destroy(): void {
     this.reset();
     if (this._keepAliveOsc) {
       try {
