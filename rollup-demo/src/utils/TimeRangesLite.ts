@@ -8,19 +8,22 @@
  *
  */
 class TimeRangesLite {
-  constructor(ranges) {
+  _ranges: Array<[number, number]>;
+  declare length: number;
+
+  constructor(ranges?: Array<[number, number]>) {
     this._ranges = ranges || [];
     Object.defineProperty(this, "length", {
       get: () => this._ranges.length,
     });
   }
-  start(i) {
+  start(i: number): number {
     if (i < 0 || i >= this._ranges.length) {
       throw new Error("TimeRanges index out of range");
     }
     return this._ranges[i][0];
   }
-  end(i) {
+  end(i: number): number {
     if (i < 0 || i >= this._ranges.length) {
       throw new Error("TimeRanges index out of range");
     }

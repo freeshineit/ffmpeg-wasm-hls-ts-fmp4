@@ -11,7 +11,10 @@
  */
 
 class Texture {
-  constructor(gl) {
+  gl: WebGLRenderingContext;
+  texture: WebGLTexture | null;
+
+  constructor(gl: WebGLRenderingContext) {
     this.gl = gl;
     this.texture = gl.createTexture();
 
@@ -22,14 +25,14 @@ class Texture {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
-  bind(unit, program, samplerName) {
+  bind(unit: number, program: WebGLProgram, samplerName: string): void {
     const gl = this.gl;
     gl.activeTexture([gl.TEXTURE0, gl.TEXTURE1, gl.TEXTURE2][unit]);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.uniform1i(gl.getUniformLocation(program, samplerName), unit);
   }
 
-  fill(width, height, data) {
+  fill(width: number, height: number, data: Uint8Array): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -70,17 +73,29 @@ const FRAGMENT_SHADER_SOURCE = [
 ].join("\n");
 
 export class WebGlRender {
-  constructor(canvas, options) {
+  gl: WebGLRenderingContext;
+  canvas: HTMLCanvasElement;
+  program: WebGLProgram;
+  verticesBuffer: WebGLBuffer | null;
+  texCoordBuffer: WebGLBuffer | null;
+  yTexture: Texture;
+  uTexture: Texture;
+  vTexture: Texture;
+  _yScratch: Uint8Array | null;
+  _uScratch: Uint8Array | null;
+  _vScratch: Uint8Array | null;
+
+  constructor(canvas: HTMLCanvasElement, options: WebGLContextAttributes = {}) {
     const contextAttributes = Object.assign(
       {
         antialias: false,
         alpha: false,
         preserveDrawingBuffer: false,
       },
-      options || {},
+      options,
     );
 
-    const gl = canvas.getContext("webgl", contextAttributes) || canvas.getContext("experimental-webgl", contextAttributes);
+    const gl = (canvas.getContext("webgl", contextAttributes) as WebGLRenderingContext | null) || (canvas.getContext("experimental-webgl", contextAttributes) as WebGLRenderingContext | null);
     if (!gl) {
       throw new Error("WebGL not supported in this browser.");
     }
@@ -132,7 +147,7 @@ export class WebGlRender {
    *   vStride: number,
    * }} frame
    */
-  renderYuv420(frame) {
+  renderYuv420(frame: { width: number; height: number; y: Uint8Array; u: Uint8Array; v: Uint8Array; yStride: number; uStride: number; vStride: number }): void {
     const { width, height, y, u, v, yStride, uStride, vStride } = frame;
     const cw = width >> 1;
     const ch = height >> 1;
@@ -153,7 +168,7 @@ export class WebGlRender {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  destroyContext() {
+  destroyContext(): void {
     try {
       const gl = this.gl;
       gl.deleteProgram(this.program);
@@ -165,8 +180,6 @@ export class WebGlRender {
 
       this.#removeEventListener();
 
-      this.gl = null;
-      this.program = null;
       this.verticesBuffer = null;
       this.texCoordBuffer = null;
       this._yScratch = null;
@@ -177,9 +190,12 @@ export class WebGlRender {
     }
   }
 
-  #createProgram() {
+  #createProgram(): WebGLProgram {
     const gl = this.gl;
     const vs = gl.createShader(gl.VERTEX_SHADER);
+    if (!vs) {
+      throw new Error("Failed to create vertex shader");
+    }
     gl.shaderSource(vs, VERTEX_SHADER_SOURCE);
     gl.compileShader(vs);
     if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
@@ -187,6 +203,9 @@ export class WebGlRender {
     }
 
     const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    if (!fs) {
+      throw new Error("Failed to create fragment shader");
+    }
     gl.shaderSource(fs, FRAGMENT_SHADER_SOURCE);
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
@@ -194,6 +213,9 @@ export class WebGlRender {
     }
 
     const program = gl.createProgram();
+    if (!program) {
+      throw new Error("Failed to create WebGL program");
+    }
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.linkProgram(program);
@@ -208,7 +230,7 @@ export class WebGlRender {
    * Pack a (possibly strided) plane into a tight `width * height` buffer.
    * Reuses a per-plane scratch buffer to avoid per-frame allocations.
    */
-  #packPlane(data, width, height, stride, scratchKey) {
+  #packPlane(data: Uint8Array, width: number, height: number, stride: number, scratchKey: "_yScratch" | "_uScratch" | "_vScratch"): Uint8Array {
     if (stride === width) {
       // Already tight; upload as-is.
       return data;
@@ -230,12 +252,12 @@ export class WebGlRender {
   // canvas event Listeners
   // ---------------------------------------------------------------------------------------
 
-  #webglcontextlostFun(e) {
+  #webglcontextlostFun(e: Event): void {
     e.preventDefault(); // 阻止浏览器默认处理
     console.log("WebGL 上下文丢失，等待恢复");
   }
 
-  #webglcontextrestoredFun(e) {
+  #webglcontextrestoredFun(_e: Event): void {
     console.log("WebGL 上下文恢复，重新初始化资源");
     // 重新创建着色器、纹理、缓冲区等
     // initWebGLResources();

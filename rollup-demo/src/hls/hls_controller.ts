@@ -2,6 +2,29 @@ import { classifyPlaylist, parseMasterPlaylist, parseMediaPlaylist, selectVarian
 import Helper from "../utils/helper";
 import Fetcher from "../network/fetcher";
 
+type TrackKind = "video" | "audio" | "muxed";
+
+interface TrackState {
+  kind: TrackKind;
+  url: string;
+  seen: Set<string>;
+  initLoaded: boolean;
+  abort: AbortController | null;
+  sleepResolve: (() => void) | null;
+  running: boolean;
+}
+
+interface HlsControllerOptions {
+  mode?: "live" | "vod";
+  lowLatencyMode?: boolean;
+  followRedirectUrl?: boolean;
+  requestInit?: RequestInit | null;
+  fetchTimeout?: number;
+  onSegment: (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: TrackKind) => Promise<void> | void;
+  onDuration?: (duration: number) => void;
+  onError?: (error: unknown) => void;
+}
+
 export class HlsController {
   /**
    * @param {object} opts
@@ -14,7 +37,23 @@ export class HlsController {
    * @param {Function} [opts.onDuration]
    * @param {Function} [opts.onError]
    */
-  constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, requestInit = null, fetchTimeout = 30000, onSegment, onDuration, onError }) {
+  mode: "live" | "vod";
+  lowLatencyMode: boolean;
+  followRedirectUrl: boolean;
+  fetcher: Fetcher;
+  onSegment: (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: TrackKind) => Promise<void> | void;
+  onDuration: (duration: number) => void;
+  onError: (error: unknown) => void;
+
+  playlistUrl: string;
+  originPlaylistUrl: string;
+  totalDuration: number;
+
+  isMaster: boolean;
+  tracks: TrackState[];
+  _onVisible: () => void;
+
+  constructor({ mode = "live", lowLatencyMode = true, followRedirectUrl = true, requestInit = null, fetchTimeout = 30000, onSegment, onDuration, onError }: HlsControllerOptions) {
     this.mode = mode;
     this.lowLatencyMode = lowLatencyMode;
     this.followRedirectUrl = followRedirectUrl;
@@ -44,7 +83,7 @@ export class HlsController {
 
   /* -------------------- public lifecycle -------------------- */
 
-  async start(playlistUrl) {
+  async start(playlistUrl: string): Promise<void> {
     this.playlistUrl = playlistUrl;
     this.originPlaylistUrl = playlistUrl;
     document.addEventListener("visibilitychange", this._onVisible);
@@ -84,15 +123,15 @@ export class HlsController {
         return;
       }
       console.warn(`[hls] master playlist resolved: video=${variant.uri}` + (audio?.uri ? ` audio=${audio.uri}` : " audio=<none>"));
-      const videoTrack = Helper.makeTrackState("video", variant.uri);
+      const videoTrack = Helper.makeTrackState("video", variant.uri) as TrackState;
       this.tracks.push(videoTrack);
       if (audio?.uri) {
-        this.tracks.push(Helper.makeTrackState("audio", audio.uri));
+        this.tracks.push(Helper.makeTrackState("audio", audio.uri) as TrackState);
       }
       await Promise.all(this.tracks.map((t) => this._loop(t)));
     } else {
       this.isMaster = false;
-      const muxedTrack = Helper.makeTrackState("muxed", this.playlistUrl);
+      const muxedTrack = Helper.makeTrackState("muxed", this.playlistUrl) as TrackState;
       this.tracks.push(muxedTrack);
       await this._loop(muxedTrack);
     }
@@ -100,7 +139,7 @@ export class HlsController {
     document.removeEventListener("visibilitychange", this._onVisible);
   }
 
-  async seekTo(targetTimeSec) {
+  async seekTo(targetTimeSec: number): Promise<number> {
     if (this.tracks.length === 0) return 0;
 
     for (const t of this.tracks) this._abortTrack(t);
@@ -131,30 +170,30 @@ export class HlsController {
     return primaryStart;
   }
 
-  stop() {
+  stop(): void {
     for (const t of this.tracks) this._abortTrack(t);
     this.tracks.length = 0;
     this.fetcher.cancelAll();
     document.removeEventListener("visibilitychange", this._onVisible);
   }
 
-  setLowLatencyMode(value) {
+  setLowLatencyMode(value: boolean): void {
     this.lowLatencyMode = !!value;
   }
 
   /** Update the base RequestInit used for all subsequent fetches. */
-  setRequestInit(requestInit) {
+  setRequestInit(requestInit: RequestInit): void {
     this.fetcher.setFetchOptions(requestInit || {});
   }
 
   /** Merge additional options into the existing fetch config. */
-  updateRequestInit(options) {
+  updateRequestInit(options: RequestInit): void {
     this.fetcher.updateFetchOptions(options || {});
   }
 
   /* -------------------- internals -------------------- */
 
-  _abortTrack(track) {
+  _abortTrack(track: TrackState): void {
     track.running = false;
     if (track.url) {
       this.fetcher.cancelRequest(track.url);
@@ -165,7 +204,7 @@ export class HlsController {
     }
   }
 
-  async _loop(track) {
+  async _loop(track: TrackState): Promise<void> {
     track.running = true;
 
     while (track.running) {
@@ -188,7 +227,7 @@ export class HlsController {
           track.initLoaded = true;
         }
 
-        const candidates = [];
+        const candidates: string[] = [];
         const useParts = this.lowLatencyMode && info.parts.length > 0;
         if (useParts) {
           for (const part of info.parts) candidates.push(part.url);
@@ -221,7 +260,7 @@ export class HlsController {
     }
   }
 
-  _sleep(track, ms) {
+  _sleep(track: TrackState, ms: number): Promise<void> {
     return new Promise((resolve) => {
       const id = setTimeout(() => {
         track.sleepResolve = null;

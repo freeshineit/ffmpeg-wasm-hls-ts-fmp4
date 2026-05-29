@@ -1,4 +1,20 @@
 export class AudioRenderer {
+  audioContext: AudioContext | null;
+  gainNode: GainNode | null;
+  startedAt: number;
+  nextPlayTime: number;
+  mediaOffsetSec: number | null;
+
+  _volume: number;
+  _muted: boolean;
+  _playbackRate: number;
+
+  _activeSources: Array<AudioBufferSourceNode & { _startAt?: number; _endsAt?: number }>;
+
+  _keepAliveOsc: OscillatorNode | null;
+  _keepAliveGain: GainNode | null;
+  _unlockBound: (() => void) | null;
+
   constructor() {
     this.audioContext = null;
     this.gainNode = null;
@@ -76,21 +92,21 @@ export class AudioRenderer {
 
   /* ---------------- API exposed to the player ---------------- */
 
-  setVolume(v) {
+  setVolume(v: number): void {
     this._volume = Math.max(0, Math.min(1, +v || 0));
     if (this.gainNode) {
       this.gainNode.gain.value = this._muted ? 0 : this._volume;
     }
   }
 
-  setMuted(m) {
+  setMuted(m: boolean): void {
     this._muted = !!m;
     if (this.gainNode) {
       this.gainNode.gain.value = this._muted ? 0 : this._volume;
     }
   }
 
-  setPlaybackRate(rate) {
+  setPlaybackRate(rate: number): void {
     const r = Math.max(0.25, Math.min(4, +rate || 1));
     const prevRate = this._playbackRate;
     if (r === prevRate) return;
@@ -142,7 +158,7 @@ export class AudioRenderer {
 
   /* ---------------- Frame ingestion ---------------- */
 
-  enqueueFrame(frame) {
+  enqueueFrame(frame: { channels: number; sampleRate: number; sampleCount: number; pcm: Float32Array; ptsMs: number }): void {
     if (!this.audioContext || !this.gainNode) {
       return;
     }
@@ -157,7 +173,7 @@ export class AudioRenderer {
       }
     }
 
-    const source = this.audioContext.createBufferSource();
+    const source = this.audioContext.createBufferSource() as AudioBufferSourceNode & { _startAt?: number; _endsAt?: number };
     source.buffer = audioBuffer;
     source.playbackRate.value = this._playbackRate;
     source.connect(this.gainNode);

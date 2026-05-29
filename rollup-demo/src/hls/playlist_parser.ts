@@ -1,10 +1,55 @@
+type AttrMap = Record<string, string>;
+
+export interface AudioRendition {
+  groupId: string;
+  name: string;
+  default: boolean;
+  language: string | null;
+  uri: string | null;
+}
+
+export interface MasterVariant {
+  bandwidth: number;
+  codecs: string;
+  resolution: string;
+  audioGroup: string | null;
+  uri: string;
+}
+
+export interface MasterPlaylist {
+  variants: MasterVariant[];
+  audioGroups: Record<string, AudioRendition[]>;
+}
+
+export interface MediaSegment {
+  url: string;
+  duration: number;
+}
+
+export interface MediaPart {
+  url: string;
+  duration: number;
+  independent: boolean;
+}
+
+export interface MediaPlaylist {
+  targetDuration: number;
+  mediaSequence: number;
+  partTarget: number | null;
+  isEndList: boolean;
+  initSegment: string | null;
+  segments: MediaSegment[];
+  parts: MediaPart[];
+  preloadHint: string | null;
+}
+
 /**
  * Split a string on commas that lie outside double-quoted regions.
  * Required for HLS attribute lists where quoted values may contain commas,
  * e.g. CODECS="avc1.4d0029,mp4a.40.2".
  */
-function splitTopLevelCommas(content) {
-  const out = [];
+function splitTopLevelCommas(content: string): string[] {
+  const out: string[] = [];
   let buf = "";
   let inQuote = false;
   for (let i = 0; i < content.length; i += 1) {
@@ -27,8 +72,8 @@ function splitTopLevelCommas(content) {
   return out;
 }
 
-function parseAttributeListBody(content) {
-  const attrs = {};
+function parseAttributeListBody(content: string): AttrMap {
+  const attrs: AttrMap = {};
   const items = splitTopLevelCommas(content);
   for (const item of items) {
     const eq = item.indexOf("=");
@@ -47,7 +92,7 @@ function parseAttributeListBody(content) {
   return attrs;
 }
 
-function parseAttributeList(line) {
+function parseAttributeList(line: string): AttrMap {
   const content = line.slice(line.indexOf(":") + 1);
   return parseAttributeListBody(content);
 }
@@ -57,7 +102,7 @@ function parseAttributeList(line) {
  *  - Has any #EXT-X-STREAM-INF and no #EXTINF -> master
  *  - Otherwise -> media (current default behavior)
  */
-export function classifyPlaylist(text) {
+export function classifyPlaylist(text: string): "master" | "media" {
   const hasStreamInf = /^#EXT-X-STREAM-INF[: ]/m.test(text);
   const hasExtinf = /^#EXTINF[: ]/m.test(text);
   if (hasStreamInf && !hasExtinf) {
@@ -74,14 +119,14 @@ export function classifyPlaylist(text) {
  *   }
  * URIs are resolved against playlistUrl, preserving any per-URI query string.
  */
-export function parseMasterPlaylist(text, playlistUrl) {
+export function parseMasterPlaylist(text: string, playlistUrl: string): MasterPlaylist {
   const lines = text.split(/\r?\n/);
-  const result = {
+  const result: MasterPlaylist = {
     variants: [],
     audioGroups: {},
   };
 
-  let pendingStreamInf = null;
+  let pendingStreamInf: Omit<MasterVariant, "uri"> | null = null;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
@@ -136,7 +181,7 @@ export function parseMasterPlaylist(text, playlistUrl) {
  * and resolve its audio rendition (DEFAULT=YES preferred, else first in group).
  * Returns { variant, audio } where either may be null.
  */
-export function selectVariantAndAudio(master) {
+export function selectVariantAndAudio(master: MasterPlaylist | null | undefined): { variant: MasterVariant | null; audio: AudioRendition | null } {
   if (!master || !master.variants || master.variants.length === 0) {
     return { variant: null, audio: null };
   }
@@ -158,11 +203,11 @@ export function selectVariantAndAudio(master) {
   return { variant: best, audio };
 }
 
-export function parseMediaPlaylist(text, playlistUrl) {
+export function parseMediaPlaylist(text: string, playlistUrl: string): MediaPlaylist {
   const base = new URL(".", playlistUrl).toString();
   const lines = text.split(/\r?\n/);
 
-  const result = {
+  const result: MediaPlaylist = {
     targetDuration: 6,
     mediaSequence: 0,
     partTarget: null,

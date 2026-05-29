@@ -10,18 +10,24 @@
 
 import Helper from "../utils/helper";
 
-const __$DEFAULT_FETCHER_OPTIONS$__ = {
+const __$DEFAULT_FETCHER_OPTIONS$__: RequestInit = {
   mode: "cors",
   credentials: "omit",
   cache: "no-store",
 };
 
+type FetchWithTimeoutOptions = RequestInit & { timeout?: number; signal?: AbortSignal };
+
 export class Fetcher {
+  _fetchOptions: RequestInit;
+  _timeout: number;
+  _abortControllers: Map<string, AbortController>;
+
   /**
    * @param {RequestInit} [fetchOptions] Base RequestInit merged into every request.
    * @param {number} [timeout=30000] Request timeout in ms (0 = no timeout).
    */
-  constructor(fetchOptions = {}, timeout = 30000) {
+  constructor(fetchOptions: RequestInit = {}, timeout = 30000) {
     this._fetchOptions = { ...__$DEFAULT_FETCHER_OPTIONS$__, ...fetchOptions };
     this._timeout = timeout;
     /** @type {Map<string, AbortController>} */
@@ -37,7 +43,7 @@ export class Fetcher {
    * @param {RequestInit & { timeout?: number, signal?: AbortSignal }} [options]
    * @returns {Promise<{ data: ArrayBuffer, url: string, contentType?: string, contentLength?: number }>}
    */
-  async fetch(url, options = {}) {
+  async fetch(url: string, options: FetchWithTimeoutOptions = {}): Promise<Response> {
     const baseHeaders = Helper.flattenHeaders(this._fetchOptions.headers);
     const perReqHeaders = Helper.flattenHeaders(options.headers);
     const mergedHeaders = { ...baseHeaders, ...perReqHeaders };
@@ -75,7 +81,7 @@ export class Fetcher {
       });
 
       if (!response.ok) {
-        const err = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const err = new Error(`HTTP ${response.status}: ${response.statusText}`) as Error & { status?: number };
         err.status = response.status;
         throw err;
       }
@@ -103,7 +109,7 @@ export class Fetcher {
    * @param {{ signal?: AbortSignal, timeout?: number }} [options]
    * @returns {Promise<{ text: string, url: string }>}
    */
-  async fetchText(url, options = {}) {
+  async fetchText(url: string, options: FetchWithTimeoutOptions = {}): Promise<{ text: string; url: string }> {
     // try {
     const response = await this.fetch(url, options);
     const text = await response.text();
@@ -126,7 +132,7 @@ export class Fetcher {
    * @param {{ signal?: AbortSignal, timeout?: number }} [options]
    * @returns {Promise<Uint8Array>}
    */
-  async fetchBytes(url, options = {}) {
+  async fetchBytes(url: string, options: FetchWithTimeoutOptions = {}): Promise<Uint8Array> {
     const response = await this.fetch(url, options);
     const data = await response.arrayBuffer();
     return new Uint8Array(data);
@@ -134,7 +140,7 @@ export class Fetcher {
 
   /* ==================== Abort ==================== */
 
-  cancelRequest(url) {
+  cancelRequest(url: string): void {
     const controller = this._abortControllers.get(url);
     if (controller) {
       controller.abort();
@@ -142,7 +148,7 @@ export class Fetcher {
     }
   }
 
-  cancelAll() {
+  cancelAll(): void {
     for (const [, controller] of this._abortControllers) {
       controller.abort();
     }
@@ -152,12 +158,12 @@ export class Fetcher {
   /* ==================== Config ==================== */
 
   /** Update the base fetch options at runtime. */
-  updateFetchOptions(options) {
+  updateFetchOptions(options: RequestInit): void {
     this._fetchOptions = { ...this._fetchOptions, ...options };
   }
 
   /** Replace the base fetch options entirely. */
-  setFetchOptions(options) {
+  setFetchOptions(options: RequestInit): void {
     this._fetchOptions = { ...__$DEFAULT_FETCHER_OPTIONS$__, ...options };
   }
 }

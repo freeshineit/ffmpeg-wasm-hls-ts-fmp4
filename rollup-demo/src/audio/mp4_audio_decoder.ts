@@ -23,10 +23,31 @@
  * buffers gaplessly).
  */
 
-import { parseAudioInit, fmp4ToAdts } from "./fmp4_aac";
+import { parseAudioInit, fmp4ToAdts, type AacConfig } from "./fmp4_aac";
+
+export interface DecodedPcmFrame {
+  channels: number;
+  sampleRate: number;
+  sampleCount: number;
+  pcm: Float32Array;
+  ptsMs: number;
+}
 
 export class Mp4AudioDecoder {
-  constructor(audioContext, onPcm, onError) {
+  audioContext: AudioContext | null;
+  onPcm: (frame: DecodedPcmFrame) => void;
+  onError: (error: Error) => void;
+
+  _initSegment: Uint8Array | null;
+  _aacConfig: AacConfig | null;
+
+  _timelineSec: number;
+  _started: boolean;
+  _decodeChain: Promise<void>;
+  _disposed: boolean;
+  _failCount: number;
+
+  constructor(audioContext: AudioContext | null, onPcm: (frame: DecodedPcmFrame) => void, onError?: (error: Error) => void) {
     this.audioContext = audioContext;
     this.onPcm = onPcm;
     this.onError = onError || (() => {});
@@ -43,12 +64,12 @@ export class Mp4AudioDecoder {
     this._failCount = 0;
   }
 
-  setAudioContext(audioContext) {
+  setAudioContext(audioContext: AudioContext | null): void {
     this.audioContext = audioContext;
   }
 
   /** Store + parse the audio init segment (ftyp+moov). */
-  setInitSegment(bytes) {
+  setInitSegment(bytes: Uint8Array | ArrayBuffer): void {
     this._initSegment = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     try {
       this._aacConfig = parseAudioInit(this._initSegment);
@@ -57,26 +78,27 @@ export class Mp4AudioDecoder {
       }
     } catch (err) {
       this._aacConfig = null;
-      this.onError(new Error(`audio init parse failed: ${err?.message || err}`));
+      const msg = err instanceof Error ? err.message : String(err);
+      this.onError(new Error(`audio init parse failed: ${msg}`));
     }
   }
 
-  hasInit() {
+  hasInit(): boolean {
     return this._aacConfig !== null;
   }
 
   /** Feed one media segment (moof+mdat). Decoding is serialized to keep order. */
-  feedSegment(bytes) {
+  feedSegment(bytes: Uint8Array | ArrayBuffer): Promise<void> {
     const media = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     this._decodeChain = this._decodeChain
       .then(() => this._decodeOne(media))
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error("[mp4-audio] decode failed:", err);
       });
     return this._decodeChain;
   }
 
-  async _decodeOne(media) {
+  async _decodeOne(media: Uint8Array): Promise<void> {
     if (this._disposed || !this.audioContext) return;
     if (!this._aacConfig) {
       // Init not parsed yet (or not AAC). Drop this segment.
@@ -90,13 +112,14 @@ export class Mp4AudioDecoder {
     }
 
     // Copy into a standalone ArrayBuffer (decodeAudioData detaches it).
-    const buf = adts.buffer.slice(adts.byteOffset, adts.byteOffset + adts.byteLength);
+    const buf = new Uint8Array(adts).buffer;
 
     let audioBuffer;
     try {
       audioBuffer = await this.audioContext.decodeAudioData(buf);
     } catch (err) {
-      this._reportFail(`decodeAudioData(ADTS) rejected: ${err?.message || err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      this._reportFail(`decodeAudioData(ADTS) rejected: ${msg}`);
       return;
     }
     this._failCount = 0;
@@ -121,7 +144,7 @@ export class Mp4AudioDecoder {
     this.onPcm({ channels, sampleRate, sampleCount, pcm, ptsMs });
   }
 
-  _reportFail(msg) {
+  _reportFail(msg: string): void {
     this._failCount += 1;
     if (this._failCount <= 3) {
       this.onError(new Error(`${msg} (#${this._failCount})`));
@@ -130,7 +153,7 @@ export class Mp4AudioDecoder {
   }
 
   /** Reset the timeline (e.g. on seek) but keep the init/config. */
-  reset() {
+  reset(): void {
     this._timelineSec = 0;
     this._started = false;
     this._failCount = 0;
@@ -138,13 +161,13 @@ export class Mp4AudioDecoder {
   }
 
   /** Full reset including init/config (e.g. switching streams). */
-  clear() {
+  clear(): void {
     this.reset();
     this._initSegment = null;
     this._aacConfig = null;
   }
 
-  dispose() {
+  dispose(): void {
     this._disposed = true;
     this.clear();
   }

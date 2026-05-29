@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { WebGlRender } from "./renderer/webgl-420p";
 import { AudioRenderer } from "./audio/audio_renderer";
 import { Mp4AudioDecoder } from "./audio/mp4_audio_decoder";
@@ -5,8 +6,18 @@ import { HlsController } from "./hls/hls_controller";
 import { WasmBridge } from "./wasm/wasm_bridge";
 import TimeRangesLite from "./utils/TimeRangesLite";
 
+interface HlsWasmPlayerOptions {
+  canvas: HTMLCanvasElement;
+  wasmJsUrl: string;
+  wasmFileUrl: string;
+  log?: (message: string) => void;
+  onIFrame?: (ptsMs: number) => void;
+}
+
 export class HlsWasmPlayer {
-  constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
+  [key: string]: any;
+
+  constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }: HlsWasmPlayerOptions) {
     this.canvas = canvas;
     this.log = log || (() => {});
     this.onIFrame = onIFrame;
@@ -96,17 +107,17 @@ export class HlsWasmPlayer {
   /* Event API (HTMLMediaElement-style)                              */
   /* ============================================================== */
 
-  addEventListener(type, listener, options) {
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void {
     return this._events.addEventListener(type, listener, options);
   }
-  removeEventListener(type, listener, options) {
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void {
     return this._events.removeEventListener(type, listener, options);
   }
-  dispatchEvent(event) {
+  dispatchEvent(event: Event): boolean {
     return this._events.dispatchEvent(event);
   }
 
-  #emit(type, detail) {
+  #emit(type: string, detail: unknown): void {
     try {
       this._events.dispatchEvent(new CustomEvent(type, { detail }));
     } catch (err) {
@@ -126,7 +137,7 @@ export class HlsWasmPlayer {
     return this._seekBaseTime || 0;
   }
 
-  set currentTime(t) {
+  set currentTime(t: number) {
     const sec = +t || 0;
     void this.seek(sec);
   }
@@ -142,7 +153,7 @@ export class HlsWasmPlayer {
   get muted() {
     return this._muted;
   }
-  set muted(v) {
+  set muted(v: boolean) {
     const next = !!v;
     if (next === this._muted) return;
     this._muted = next;
@@ -153,7 +164,7 @@ export class HlsWasmPlayer {
   get volume() {
     return this._volume;
   }
-  set volume(v) {
+  set volume(v: number) {
     const clamped = Math.max(0, Math.min(1, +v || 0));
     if (clamped === this._volume) return;
     this._volume = clamped;
@@ -164,7 +175,7 @@ export class HlsWasmPlayer {
   get playbackRate() {
     return this._playbackRate;
   }
-  set playbackRate(r) {
+  set playbackRate(r: number) {
     const clamped = Math.max(0.25, Math.min(4, +r || 1));
     if (clamped === this._playbackRate) return;
     this._playbackRate = clamped;
@@ -226,7 +237,22 @@ export class HlsWasmPlayer {
       );
 
       await this.wasm.init({
-        onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, isKeyFrame, codecName, yData, uData, vData) => {
+        onVideoFrame: (
+          width: number,
+          height: number,
+          yPtr: number | null,
+          yStride: number,
+          uPtr: number | null,
+          uStride: number,
+          vPtr: number | null,
+          vStride: number,
+          ptsMs: number,
+          isKeyFrame: boolean,
+          codecName: string,
+          yData: Uint8Array,
+          uData: Uint8Array,
+          vData: Uint8Array,
+        ) => {
           const y = yData;
           const u = uData;
           const v = vData;
@@ -257,7 +283,7 @@ export class HlsWasmPlayer {
 
           this.#logSegmentVideoInfo(width, height, yStride, uStride, vStride, normalizedPtsMs, codecName);
         },
-        onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs, codecName, pcmData) => {
+        onAudioFrame: (channels: number, sampleRate: number, sampleCount: number, dataPtr: number | null, ptsMs: number, codecName: string, pcmData: Float32Array) => {
           const pcm = pcmData;
           const normalizedPtsMs = this.#normalizeAudioPts(ptsMs, sampleCount, sampleRate);
           this.audio.enqueueFrame({
@@ -270,7 +296,7 @@ export class HlsWasmPlayer {
 
           this.#logSegmentAudioInfo(channels, sampleRate, sampleCount, normalizedPtsMs, codecName);
         },
-        onLog: (level, msg) => {
+        onLog: (level: string, msg: string) => {
           this.log(`[wasm:${level}] ${msg}`);
           this.#maybeFallbackFromLowLatency(msg);
         },
@@ -283,7 +309,7 @@ export class HlsWasmPlayer {
     return this._initPromise;
   }
 
-  async start(url, mode) {
+  async start(url: string, mode: "live" | "vod" = "vod") {
     if (!this._initialized && this._initPromise) {
       this.log("Waiting for WASM initialization...");
       await this._initPromise;
@@ -346,7 +372,7 @@ export class HlsWasmPlayer {
     this.hls = new HlsController({
       mode: this._currentMode,
       lowLatencyMode: true,
-      onDuration: (dur) => {
+      onDuration: (dur: number) => {
         const prev = this._totalDuration;
         this._totalDuration = dur;
         if (dur !== prev) {
@@ -361,13 +387,13 @@ export class HlsWasmPlayer {
           });
         }
       },
-      onError: (err) => {
+      onError: (err: unknown) => {
         this.#emit("error", {
-          message: err?.message || String(err),
+          message: err instanceof Error ? err.message : String(err),
           error: err,
         });
       },
-      onSegment: async (bytes, isInitSegment, segmentUrl, trackKind) => {
+      onSegment: async (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: "video" | "audio" | "muxed") => {
         // Standalone audio track (master/multivariant): decode via the browser
         // using AudioContext.decodeAudioData rather than the WASM demuxer.
         // Audio uses its OWN flow-control gate (audio buffer only) so a slow
@@ -456,7 +482,7 @@ export class HlsWasmPlayer {
   }
 
   /** Seek to a target time (seconds). */
-  async seek(timeSec) {
+  async seek(timeSec: number) {
     if (!this.running || !this.hls) {
       this.log("Cannot seek: not playing.");
       return;
@@ -561,7 +587,7 @@ export class HlsWasmPlayer {
   /* Internals                                                       */
   /* ============================================================== */
 
-  #maybeFallbackFromLowLatency(msg) {
+  #maybeFallbackFromLowLatency(msg: string) {
     if (!this.hls || !this.hls.lowLatencyMode || this.hevcCompatFallbackTriggered) {
       return;
     }
@@ -583,7 +609,7 @@ export class HlsWasmPlayer {
     this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
 
-  #enqueueVideoFrame(frame) {
+  #enqueueVideoFrame(frame: { ptsMs: number; width: number; height: number; y: Uint8Array; u: Uint8Array; v: Uint8Array; yStride: number; uStride: number; vStride: number; isKeyFrame: boolean }) {
     if (!Number.isFinite(frame.ptsMs)) {
       return;
     }
@@ -757,7 +783,7 @@ export class HlsWasmPlayer {
    * gate. While the gate is closed (master mode, before the first video frame),
    * frames are buffered so the audio clock does not start before video.
    */
-  #emitAudioFrame(frame) {
+  #emitAudioFrame(frame: { channels: number; sampleRate: number; sampleCount: number; ptsMs: number; pcm: Float32Array }) {
     if (!this._avGateOpen) {
       this._pendingAudioFrames.push(frame);
       // Safety cap: don't buffer unbounded audio if video never shows up
@@ -827,7 +853,7 @@ export class HlsWasmPlayer {
     return Math.max(0, tailPtsSec - mediaTimeSec);
   }
 
-  #normalizeVideoPts(rawPtsMs) {
+  #normalizeVideoPts(rawPtsMs: number) {
     const hasRaw = Number.isFinite(rawPtsMs);
     if (this.lastVideoNormPtsMs === null) {
       this.lastVideoRawPtsMs = hasRaw ? rawPtsMs : 0;
@@ -851,7 +877,7 @@ export class HlsWasmPlayer {
     return this.lastVideoNormPtsMs;
   }
 
-  #normalizeAudioPts(rawPtsMs, sampleCount, sampleRate) {
+  #normalizeAudioPts(rawPtsMs: number, sampleCount: number, sampleRate: number) {
     const frameDurMs = sampleRate > 0 ? (sampleCount * 1000) / sampleRate : 20;
     const hasRaw = Number.isFinite(rawPtsMs);
 
@@ -876,7 +902,7 @@ export class HlsWasmPlayer {
     return this.lastAudioNormPtsMs;
   }
 
-  #beginSegmentInfo(segmentUrl, byteLength) {
+  #beginSegmentInfo(segmentUrl: string, byteLength: number) {
     this.#flushHeadSegmentInfo();
 
     this.segmentInfoQueue.push({
@@ -899,8 +925,8 @@ export class HlsWasmPlayer {
     }
   }
 
-  #logSegmentVideoInfo(width, height, yStride, uStride, vStride, ptsMs, codecName) {
-    const ctx = this.segmentInfoQueue.find((item) => !item.videoInfo);
+  #logSegmentVideoInfo(width: number, height: number, yStride: number, uStride: number, vStride: number, ptsMs: number, codecName: string) {
+    const ctx = this.segmentInfoQueue.find((item: any) => !item.videoInfo);
     if (!ctx) {
       return;
     }
@@ -917,8 +943,8 @@ export class HlsWasmPlayer {
     this.#flushSegmentInfo(ctx, false);
   }
 
-  #logSegmentAudioInfo(channels, sampleRate, sampleCount, ptsMs, codecName) {
-    const ctx = this.segmentInfoQueue.find((item) => !item.audioInfo);
+  #logSegmentAudioInfo(channels: number, sampleRate: number, sampleCount: number, ptsMs: number, codecName: string) {
+    const ctx = this.segmentInfoQueue.find((item: any) => !item.audioInfo);
     if (!ctx) {
       return;
     }
@@ -933,7 +959,7 @@ export class HlsWasmPlayer {
     this.#flushSegmentInfo(ctx, false);
   }
 
-  #flushSegmentInfo(ctx, force = false) {
+  #flushSegmentInfo(ctx: any, force = false) {
     if (!ctx || ctx.printed) {
       return;
     }
@@ -999,7 +1025,7 @@ export class HlsWasmPlayer {
     }
   }
 
-  #shortSegmentName(segmentUrl) {
+  #shortSegmentName(segmentUrl: string) {
     try {
       const url = new URL(segmentUrl);
       const parts = url.pathname.split("/");
