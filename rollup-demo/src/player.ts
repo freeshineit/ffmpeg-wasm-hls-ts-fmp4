@@ -2,7 +2,7 @@
 import { WebGlRender } from "./renderer/webgl-420p";
 import { AudioRenderer } from "./audio/audio_renderer";
 import { Mp4AudioDecoder } from "./audio/mp4_audio_decoder";
-import { HlsController } from "./hls/hls_controller";
+import { PlaylistManager } from "./playlist";
 import { WasmBridge } from "./wasm/wasm_bridge";
 import TimeRangesLite from "./utils/TimeRangesLite";
 import type { IAudioPcmFrame, ISegmentInfo, HlsWasmPlayerOptions, IVideoFrame } from "./types";
@@ -20,7 +20,7 @@ export class HlsWasmPlayer {
   _avGateOpen: boolean = true;
   _pendingAudioFrames: IAudioPcmFrame[] = [];
   _avGateTimer: number = 0;
-  hls: HlsController | null = null;
+  playlist: PlaylistManager;
   running: boolean = false;
   _initPromise: Promise<void> | null = null;
   _initialized: boolean = false;
@@ -91,7 +91,7 @@ export class HlsWasmPlayer {
     this._pendingAudioFrames = [];
     this._avGateTimer = 0;
 
-    this.hls = null;
+    this.playlist = new PlaylistManager(this);
     this.running = false;
     this._initPromise = null;
     this._initialized = false;
@@ -164,7 +164,7 @@ export class HlsWasmPlayer {
     return this._events.dispatchEvent(event);
   }
 
-  #emit(type: string, detail: unknown): void {
+  _emit(type: string, detail: unknown): void {
     try {
       this._events.dispatchEvent(new CustomEvent(type, { detail }));
     } catch (err) {
@@ -205,7 +205,7 @@ export class HlsWasmPlayer {
     if (next === this._muted) return;
     this._muted = next;
     this.audio.setMuted(this._muted);
-    this.#emit("volumechange", { volume: this._volume, muted: this._muted });
+    this._emit("volumechange", { volume: this._volume, muted: this._muted });
   }
 
   get volume(): number {
@@ -216,7 +216,7 @@ export class HlsWasmPlayer {
     if (clamped === this._volume) return;
     this._volume = clamped;
     this.audio.setVolume(clamped);
-    this.#emit("volumechange", { volume: this._volume, muted: this._muted });
+    this._emit("volumechange", { volume: this._volume, muted: this._muted });
   }
 
   get playbackRate(): number {
@@ -227,7 +227,7 @@ export class HlsWasmPlayer {
     if (clamped === this._playbackRate) return;
     this._playbackRate = clamped;
     this.audio.setPlaybackRate(clamped);
-    this.#emit("ratechange", { playbackRate: this._playbackRate });
+    this._emit("ratechange", { playbackRate: this._playbackRate });
   }
 
   /** True once VOD playback has reached the end of the playlist timeline. */
@@ -276,7 +276,7 @@ export class HlsWasmPlayer {
       this.audioDecoder = new Mp4AudioDecoder(
         this.audio.audioContext,
         (frame) => {
-          this.#emitAudioFrame(frame);
+          this._emitAudioFrame(frame);
         },
         (err) => {
           this.log(`[audio] ${err.message}`);
@@ -393,7 +393,7 @@ export class HlsWasmPlayer {
     // video), open the gate after 2s so audio is never stuck silent.
     this._avGateTimer = window.setTimeout(() => this.#openAvGate(), 2000);
 
-    this.#emit("loadstart", { src: url, mode: this._currentMode });
+    this._emit("loadstart", { src: url, mode: this._currentMode });
 
     this.hevcCompatFallbackTriggered = false;
     this.running = true;
@@ -416,61 +416,7 @@ export class HlsWasmPlayer {
     // prevent massive frame-drop storms when rAF was suspended.
     document.addEventListener("visibilitychange", this._onVisibilityBound);
 
-    this.hls = new HlsController({
-      mode: this._currentMode,
-      lowLatencyMode: true,
-      onDuration: (dur: number) => {
-        const prev = this._totalDuration;
-        this._totalDuration = dur;
-        if (dur !== prev) {
-          this.#emit("durationchange", { duration: this.duration });
-        }
-        if (!this._loadedMetadataFired) {
-          this._loadedMetadataFired = true;
-          this.#emit("loadedmetadata", {
-            duration: this.duration,
-            width: this.canvas?.width,
-            height: this.canvas?.height,
-          });
-        }
-      },
-      onError: (err: unknown) => {
-        this.#emit("error", {
-          message: err instanceof Error ? err.message : String(err),
-          error: err,
-        });
-      },
-      onSegment: async (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: "video" | "audio" | "muxed") => {
-        // Standalone audio track (master/multivariant): decode via the browser
-        // using AudioContext.decodeAudioData rather than the WASM demuxer.
-        // Audio uses its OWN flow-control gate (audio buffer only) so a slow
-        // video decoder can never starve / block the audio pipeline.
-        if (trackKind === "audio") {
-          await this.#waitForAudioFlowControl();
-          this._hasSeparateAudioTrack = true;
-          if (!this.audioDecoder) return;
-          if (isInitSegment) {
-            this.audioDecoder.setInitSegment(bytes);
-            this.log(`audio-init: ${segmentUrl}`);
-          } else {
-            void this.audioDecoder.feedSegment(bytes);
-            this.log(`audio-seg: ${segmentUrl}`);
-          }
-          return;
-        }
-
-        // Video / muxed track → WASM decoder, gated by the full A/V flow control.
-        await this.#waitForFlowControl();
-        if (!isInitSegment) {
-          this.#beginSegmentInfo(segmentUrl, bytes.length);
-        }
-        this.wasm.feedSegment(bytes, isInitSegment);
-        this.log(`${isInitSegment ? "init" : "seg"}: ${segmentUrl}`);
-      },
-    });
-
-    this.log(`Start ${this._currentMode} playback: ${url}`);
-    this.hls.start(url);
+    this.playlist.start(url, this._currentMode);
     this.#startTimeUpdate();
   }
 
@@ -480,10 +426,7 @@ export class HlsWasmPlayer {
     this._paused = true;
     this.#stopTimeUpdate();
 
-    if (this.hls) {
-      this.hls.stop();
-      this.hls = null;
-    }
+    this.playlist.stop();
 
     document.removeEventListener("visibilitychange", this._onVisibilityBound);
 
@@ -516,7 +459,7 @@ export class HlsWasmPlayer {
       this._avGateTimer = 0;
     }
     if (wasRunning) {
-      this.#emit("abort", {});
+      this._emit("abort", {});
     }
     this.log("Playback stopped.");
   }
@@ -530,14 +473,14 @@ export class HlsWasmPlayer {
 
   /** Seek to a target time (seconds). */
   async seek(timeSec: number): Promise<void> {
-    if (!this.running || !this.hls) {
+    if (!this.running || !this.playlist.isLoaded) {
       this.log("Cannot seek: not playing.");
       return;
     }
     this.log(`Seeking to ${timeSec.toFixed(1)}s`);
 
     this._ended = false;
-    this.#emit("seeking", { target: timeSec });
+    this._emit("seeking", { target: timeSec });
 
     // Reset decoder state
     this.wasm.reset();
@@ -564,11 +507,11 @@ export class HlsWasmPlayer {
     this.lastDropLogAt = 0;
     this._lastRenderedFramePtsSec = null;
 
-    const segmentStart = await this.hls.seekTo(timeSec);
+    const segmentStart = await this.playlist.seekTo(timeSec);
     this._seekBaseTime = segmentStart;
     this._playingFired = false; // re-fire playing once first frame after seek renders
     this.log(`Seek done, segment starts at ${segmentStart.toFixed(1)}s`);
-    this.#emit("seeked", { currentTime: this.currentTime });
+    this._emit("seeked", { currentTime: this.currentTime });
   }
 
   /* ============================================================== */
@@ -577,7 +520,7 @@ export class HlsWasmPlayer {
 
   /** Resume playback. If never started, this is a no-op (use `start()` first). */
   async play(): Promise<void> {
-    if (!this.hls) {
+    if (!this.playlist.isLoaded) {
       // Mirror HTMLMediaElement: play() on an unloaded element is a no-op
       // (we don't auto-load because we don't know what URL to use).
       this.log("play() ignored: no media loaded. Call start(url, mode) first.");
@@ -635,7 +578,7 @@ export class HlsWasmPlayer {
   /* ============================================================== */
 
   #maybeFallbackFromLowLatency(msg: string): void {
-    if (!this.hls || !this.hls.lowLatencyMode || this.hevcCompatFallbackTriggered) {
+    if (!this.playlist.isLoaded || !this.playlist.isLowLatencyMode || this.hevcCompatFallbackTriggered) {
       return;
     }
 
@@ -648,11 +591,7 @@ export class HlsWasmPlayer {
     }
 
     this.hevcCompatFallbackTriggered = true;
-    if (typeof this.hls.setLowLatencyMode === "function") {
-      this.hls.setLowLatencyMode(false);
-    } else {
-      this.hls.lowLatencyMode = false;
-    }
+    this.playlist.setLowLatencyMode(false);
     this.log("[compat] HEVC NALU parse warning detected. Switched to segment-only mode.");
   }
 
@@ -743,7 +682,7 @@ export class HlsWasmPlayer {
       this._ended = true;
       this._paused = true;
       this.#stopTimeUpdate();
-      this.#emit("ended", { currentTime: this.currentTime });
+      this._emit("ended", { currentTime: this.currentTime });
     }
   }
 
@@ -756,7 +695,7 @@ export class HlsWasmPlayer {
       // emit timeupdate when time has actually moved (or first emission)
       if (t !== this._lastEmittedTimeSec) {
         this._lastEmittedTimeSec = t;
-        this.#emit("timeupdate", { currentTime: t });
+        this._emit("timeupdate", { currentTime: t });
       }
       this.#updatePlayingWaitingState();
     }, 250);
@@ -779,11 +718,11 @@ export class HlsWasmPlayer {
     if (hasFrame && !starving && !this._playingFired) {
       this._playingFired = true;
       this._waitingFired = false;
-      this.#emit("playing", { currentTime: this.currentTime });
+      this._emit("playing", { currentTime: this.currentTime });
     } else if (starving && !this._waitingFired) {
       this._waitingFired = true;
       this._playingFired = false;
-      this.#emit("waiting", { currentTime: this.currentTime });
+      this._emit("waiting", { currentTime: this.currentTime });
     }
   }
 
@@ -831,7 +770,7 @@ export class HlsWasmPlayer {
    * gate. While the gate is closed (master mode, before the first video frame),
    * frames are buffered so the audio clock does not start before video.
    */
-  #emitAudioFrame(frame: IAudioPcmFrame): void {
+  _emitAudioFrame(frame: IAudioPcmFrame): void {
     if (!this._avGateOpen) {
       this._pendingAudioFrames.push(frame);
       // Safety cap: don't buffer unbounded audio if video never shows up
@@ -863,7 +802,7 @@ export class HlsWasmPlayer {
     }
   }
 
-  async #waitForFlowControl(): Promise<void> {
+  async _waitForFlowControl(): Promise<void> {
     while (this.running) {
       const audioBuffered = this.audio.getBufferedSeconds();
       const videoLeadSec = this.#getVideoLeadSec();
@@ -880,7 +819,7 @@ export class HlsWasmPlayer {
    * the video gate so slow video decoding cannot starve audio (and vice
    * versa). Only throttles when the scheduled audio buffer runs ahead.
    */
-  async #waitForAudioFlowControl(): Promise<void> {
+  async _waitForAudioFlowControl(): Promise<void> {
     while (this.running) {
       if (this.audio.getBufferedSeconds() <= this.maxAudioBufferedSec) {
         return;
@@ -950,7 +889,7 @@ export class HlsWasmPlayer {
     return this.lastAudioNormPtsMs;
   }
 
-  #beginSegmentInfo(segmentUrl: string, byteLength: number): void {
+  _beginSegmentInfo(segmentUrl: string, byteLength: number): void {
     this.#flushHeadSegmentInfo();
 
     this.segmentInfoQueue.push({
