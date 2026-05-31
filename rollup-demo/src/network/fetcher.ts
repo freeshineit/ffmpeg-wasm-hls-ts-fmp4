@@ -26,7 +26,7 @@ interface FetchTextResult {
 export class Fetcher {
   _fetchOptions: RequestInit;
   _timeout: number;
-  _abortControllers: Map<string, AbortController>;
+  _abortControllers: Map<string, Set<AbortController>>;
 
   constructor(fetchOptions: RequestInit = {}, timeout: number = 30000) {
     this._fetchOptions = { ...__$DEFAULT_FETCHER_OPTIONS$__, ...fetchOptions };
@@ -52,7 +52,10 @@ export class Fetcher {
     };
 
     const controller = new AbortController();
-    this._abortControllers.set(url, controller);
+    if (!this._abortControllers.has(url)) {
+      this._abortControllers.set(url, new Set());
+    }
+    this._abortControllers.get(url)!.add(controller);
 
     const externalSignal = options.signal;
     if (externalSignal) {
@@ -84,7 +87,13 @@ export class Fetcher {
       return response;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      this._abortControllers.delete(url);
+      const set = this._abortControllers.get(url);
+      if (set) {
+        set.delete(controller);
+        if (set.size === 0) {
+          this._abortControllers.delete(url);
+        }
+      }
     }
   }
 
@@ -105,16 +114,20 @@ export class Fetcher {
   /* ==================== Abort ==================== */
 
   cancelRequest(url: string): void {
-    const controller = this._abortControllers.get(url);
-    if (controller) {
-      controller.abort();
+    const set = this._abortControllers.get(url);
+    if (set) {
+      for (const controller of set) {
+        controller.abort();
+      }
       this._abortControllers.delete(url);
     }
   }
 
   cancelAll(): void {
-    for (const [, controller] of this._abortControllers) {
-      controller.abort();
+    for (const [, set] of this._abortControllers) {
+      for (const controller of set) {
+        controller.abort();
+      }
     }
     this._abortControllers.clear();
   }

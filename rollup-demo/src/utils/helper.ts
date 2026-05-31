@@ -3,15 +3,12 @@ class Helper {
    * Per-track fetch loop state. Each track ("muxed" | "video" | "audio")
    * carries its own seen-set, init-loaded flag and abort controller.
    */
-  static makeTrackState(
-    kind: "muxed" | "video" | "audio",
-    url: string,
-  ): {
+  // prettier-ignore
+  static makeTrackState(kind: "muxed" | "video" | "audio", url: string): {
     kind: "muxed" | "video" | "audio";
     url: string;
     seen: Set<string>;
     initLoaded: boolean;
-    abort: AbortController | null;
     sleepResolve: (() => void) | null;
     running: boolean;
   } {
@@ -20,7 +17,6 @@ class Helper {
       url,
       seen: new Set(),
       initLoaded: false,
-      abort: null,
       sleepResolve: null,
       running: false,
     };
@@ -42,6 +38,14 @@ class Helper {
       Object.assign(out, h);
     }
     return out;
+  }
+
+  static getPlaylistType(text: string): "live" | "vod" {
+    if (/#EXT-X-ENDLIST/.test(text)) {
+      return "vod";
+    } else {
+      return "live";
+    }
   }
 }
 

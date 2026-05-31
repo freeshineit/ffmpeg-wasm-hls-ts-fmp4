@@ -48,7 +48,9 @@ export interface ISegmentInfo {
  */
 export type TrackKind = "video" | "audio" | "muxed";
 
-export interface TrackState {
+/**
+ */
+export interface IM3U8AVTrack {
   kind: TrackKind;
   url: string;
   seen: Set<string>;

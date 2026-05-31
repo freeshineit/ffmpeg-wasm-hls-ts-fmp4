@@ -17,10 +17,9 @@ export class PlaylistManager {
     return this._totalDuration || 0;
   }
 
-  public start(url: string, mode: "live" | "vod") {
+  public start(url: string) {
     this._totalDuration = 0;
     this.hls = new HlsController({
-      mode: mode,
       lowLatencyMode: true,
       onDuration: (dur: number) => {
         const prev = this._totalDuration;
@@ -47,6 +46,7 @@ export class PlaylistManager {
       onSegment: async (bytes: Uint8Array, isInitSegment: boolean, segmentUrl: string, trackKind: "video" | "audio" | "muxed") => {
         if (trackKind === "audio") {
           await this.player._waitForAudioFlowControl();
+          if (!this.player.running) return;
           this.player._hasSeparateAudioTrack = true;
           if (!this.player.audioDecoder) return;
           if (isInitSegment) {
@@ -60,6 +60,7 @@ export class PlaylistManager {
         }
 
         await this.player._waitForFlowControl();
+        if (!this.player.running) return;
         if (!isInitSegment) {
           this.player._beginSegmentInfo(segmentUrl, bytes.length);
         }
@@ -68,7 +69,7 @@ export class PlaylistManager {
       },
     });
 
-    this.player.log(`Start ${mode} playback: ${url}`);
+    this.player.log(`Start playback: ${url}`);
     this.hls.start(url);
   }
 
@@ -79,9 +80,9 @@ export class PlaylistManager {
     }
   }
 
-  public async seekTo(timeSec: number) {
+  public async seek(timeSec: number) {
     if (this.hls) {
-      return await this.hls.seekTo(timeSec);
+      return await this.hls.seek(timeSec);
     }
     return 0;
   }

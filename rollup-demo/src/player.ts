@@ -466,6 +466,14 @@ export class HlsWasmPlayer {
 
   async destroy(): Promise<void> {
     await this.stop();
+
+    if (this.renderer && typeof this.renderer.destroy === "function") {
+      this.renderer.destroy();
+    }
+    if (this.audio && typeof this.audio.destroy === "function") {
+      this.audio.destroy();
+    }
+
     this.wasm.destroy();
     this._initialized = false;
     this._initPromise = null;
@@ -507,7 +515,7 @@ export class HlsWasmPlayer {
     this.lastDropLogAt = 0;
     this._lastRenderedFramePtsSec = null;
 
-    const segmentStart = await this.playlist.seekTo(timeSec);
+    const segmentStart = await this.playlist.seek(timeSec);
     this._seekBaseTime = segmentStart;
     this._playingFired = false; // re-fire playing once first frame after seek renders
     this.log(`Seek done, segment starts at ${segmentStart.toFixed(1)}s`);

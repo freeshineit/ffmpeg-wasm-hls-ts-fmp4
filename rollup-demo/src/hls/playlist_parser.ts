@@ -62,6 +62,7 @@ function parseAttributeList(line: string): AttrMap {
 export function classifyPlaylist(text: string): "master" | "media" {
   const hasStreamInf = /^#EXT-X-STREAM-INF[: ]/m.test(text);
   const hasExtinf = /^#EXTINF[: ]/m.test(text);
+  // const type = /#EXT-X-PLAYLIST-TYPE:VOD/
   if (hasStreamInf && !hasExtinf) {
     return "master";
   }
@@ -219,6 +220,7 @@ export function parseMediaPlaylist(text: string, playlistUrl: string): MediaPlay
       continue;
     }
 
+    // #EXT-X-PRELOAD-HINT 是 HLS Low-Latency（LL-HLS） 规范中的一个标签，用于提示播放器可以预取即将出现的下一个片段（part或segment），以进一步降低延迟。
     if (line.startsWith("#EXT-X-PRELOAD-HINT:")) {
       const attrs = parseAttributeList(line);
       if (attrs.URI) {
