@@ -61,8 +61,14 @@ static void custom_av_log_callback(void* ptr, int level, const char* fmt, va_lis
   char line[1024];
   vsnprintf(line, sizeof(line), fmt, vl);
   
-  // Filter out HEVC NALU parse errors that spam the console for LL-HLS fragments
-  if (strstr(line, "Failed to parse header of NALU") || strstr(line, "Invalid data found when processing input")) {
+  // Filter out recoverable demux/decode noise that is common on fragmented LL-HLS input.
+  if (strstr(line, "Failed to parse header of NALU") ||
+      strstr(line, "Invalid data found when processing input") ||
+      strstr(line, "Packet corrupt") ||
+      strstr(line, "DTS discontinuity") ||
+      strstr(line, "Could not find ref with POC") ||
+      strstr(line, "Error constructing the frame RPS") ||
+      strstr(line, "Skipping invalid undecodable NALU")) {
     return;
   }
   
@@ -88,6 +94,48 @@ static int read_packet(void* opaque, uint8_t* buf, int buf_size) {
   std::memcpy(buf, mem->data + mem->pos, n);
   mem->pos += n;
   return static_cast<int>(n);
+}
+
+static AVPixelFormat normalizePixelFormat(AVPixelFormat pix_fmt) {
+  switch (pix_fmt) {
+    case AV_PIX_FMT_YUVJ420P:
+      return AV_PIX_FMT_YUV420P;
+    case AV_PIX_FMT_YUVJ422P:
+      return AV_PIX_FMT_YUV422P;
+    case AV_PIX_FMT_YUVJ444P:
+      return AV_PIX_FMT_YUV444P;
+    case AV_PIX_FMT_YUVJ440P:
+      return AV_PIX_FMT_YUV440P;
+    default:
+      return pix_fmt;
+  }
+}
+
+static bool isFullRangePixelFormat(AVPixelFormat pix_fmt, AVColorRange color_range) {
+  if (color_range == AVCOL_RANGE_JPEG) {
+    return true;
+  }
+
+  switch (pix_fmt) {
+    case AV_PIX_FMT_YUVJ420P:
+    case AV_PIX_FMT_YUVJ422P:
+    case AV_PIX_FMT_YUVJ444P:
+    case AV_PIX_FMT_YUVJ440P:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static bool isTimestampDiscontinuity(int64_t previous_dts_us, int64_t current_dts_us) {
+  if (previous_dts_us == AV_NOPTS_VALUE || current_dts_us == AV_NOPTS_VALUE) {
+    return false;
+  }
+
+  constexpr int64_t kBackwardToleranceUs = 500 * 1000;
+  constexpr int64_t kForwardToleranceUs = 30 * 1000 * 1000;
+  return current_dts_us + kBackwardToleranceUs < previous_dts_us ||
+         current_dts_us - previous_dts_us > kForwardToleranceUs;
 }
 
 class Player {
@@ -152,6 +200,9 @@ class Player {
     segment_buffer_.clear();
     video_stream_index_ = -1;
     audio_stream_index_ = -1;
+    last_video_dts_us_ = AV_NOPTS_VALUE;
+    last_audio_dts_us_ = AV_NOPTS_VALUE;
+    waiting_for_video_keyframe_ = true;
   }
 
  private:
@@ -179,7 +230,10 @@ class Player {
     }
 
     fmt->pb = avio;
-    fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    fmt->flags |= AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_DISCARD_CORRUPT;
+    fmt->probesize = 8 * 1024 * 1024;
+    fmt->max_analyze_duration = 2 * AV_TIME_BASE;
+    fmt->fps_probe_size = 0;
 
     int ret = avformat_open_input(&fmt, nullptr, nullptr, nullptr);
     if (ret < 0) {
@@ -223,6 +277,8 @@ class Player {
         break;
       }
 
+      maybeHandleTimestampDiscontinuity(pkt, fmt->streams[pkt->stream_index]->time_base);
+
       if (pkt->stream_index == video_stream_index_ && video_dec_ctx_) {
         if (video_bsf_ctx_) {
           ret = av_bsf_send_packet(video_bsf_ctx_, pkt);
@@ -235,13 +291,17 @@ class Player {
                 break;
               }
               if (ret >= 0) {
-                decodePacket(video_dec_ctx_, bsf_pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+                if (shouldDecodeVideoPacket(bsf_pkt)) {
+                  decodePacket(video_dec_ctx_, bsf_pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+                }
               }
               av_packet_free(&bsf_pkt);
             }
           }
         } else {
-          decodePacket(video_dec_ctx_, pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+          if (shouldDecodeVideoPacket(pkt)) {
+            decodePacket(video_dec_ctx_, pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
+          }
         }
       } else if (pkt->stream_index == audio_stream_index_ && audio_dec_ctx_) {
         decodePacket(audio_dec_ctx_, pkt, frame, false, fmt->streams[audio_stream_index_]->time_base);
@@ -259,7 +319,9 @@ class Player {
       video_stream_index_ = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
       if (video_stream_index_ >= 0) {
         const int ret = openVideoDecoder(fmt->streams[video_stream_index_]);
-        if (ret < 0) {
+        if (ret == AVERROR_DECODER_NOT_FOUND) {
+          video_stream_index_ = -1;
+        } else if (ret < 0) {
           return ret;
         }
       }
@@ -269,10 +331,17 @@ class Player {
       audio_stream_index_ = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
       if (audio_stream_index_ >= 0) {
         const int ret = openAudioDecoder(fmt->streams[audio_stream_index_]);
-        if (ret < 0) {
+        if (ret == AVERROR_DECODER_NOT_FOUND) {
+          audio_stream_index_ = -1;
+        } else if (ret < 0) {
           return ret;
         }
       }
+    }
+
+    if (video_stream_index_ < 0 && audio_stream_index_ < 0) {
+      js_on_log(3, "No supported audio or video stream found in segment.");
+      return AVERROR_STREAM_NOT_FOUND;
     }
 
     return 0;
@@ -326,6 +395,8 @@ class Player {
       // Keep decoding through damaged HEVC NAL units when possible.
       video_dec_ctx_->err_recognition |= AV_EF_IGNORE_ERR;
     }
+
+    video_dec_ctx_->flags |= AV_CODEC_FLAG_OUTPUT_CORRUPT;
 
     ret = avcodec_open2(video_dec_ctx_, codec, nullptr);
     if (ret < 0) {
@@ -387,6 +458,56 @@ class Player {
     return 0;
   }
 
+  void maybeHandleTimestampDiscontinuity(AVPacket* pkt, AVRational time_base) {
+    if (!pkt || pkt->dts == AV_NOPTS_VALUE) {
+      return;
+    }
+
+    const int64_t current_dts_us = av_rescale_q(pkt->dts, time_base, AV_TIME_BASE_Q);
+
+    if (pkt->stream_index == video_stream_index_) {
+      if (isTimestampDiscontinuity(last_video_dts_us_, current_dts_us)) {
+        flushVideoPipeline();
+      }
+      last_video_dts_us_ = current_dts_us;
+      return;
+    }
+
+    if (pkt->stream_index == audio_stream_index_) {
+      if (isTimestampDiscontinuity(last_audio_dts_us_, current_dts_us) && audio_dec_ctx_) {
+        avcodec_flush_buffers(audio_dec_ctx_);
+      }
+      last_audio_dts_us_ = current_dts_us;
+    }
+  }
+
+  bool shouldDecodeVideoPacket(const AVPacket* pkt) {
+    if (!pkt) {
+      return false;
+    }
+
+    if (!waiting_for_video_keyframe_) {
+      return true;
+    }
+
+    if ((pkt->flags & AV_PKT_FLAG_KEY) == 0) {
+      return false;
+    }
+
+    waiting_for_video_keyframe_ = false;
+    return true;
+  }
+
+  void flushVideoPipeline() {
+    waiting_for_video_keyframe_ = true;
+    if (video_bsf_ctx_) {
+      av_bsf_flush(video_bsf_ctx_);
+    }
+    if (video_dec_ctx_) {
+      avcodec_flush_buffers(video_dec_ctx_);
+    }
+  }
+
   void decodePacket(AVCodecContext* dec_ctx, AVPacket* pkt, AVFrame* frame, bool is_video, AVRational time_base) {
     int ret = avcodec_send_packet(dec_ctx, pkt);
     if (ret < 0) {
@@ -430,12 +551,14 @@ class Player {
     }
 
     if (!sws_ctx_ || src->width != video_width_ || src->height != video_height_ || src->format != video_src_pix_fmt_) {
+      const AVPixelFormat src_pix_fmt = normalizePixelFormat(static_cast<AVPixelFormat>(src->format));
+      const int src_full_range = isFullRangePixelFormat(static_cast<AVPixelFormat>(src->format), src->color_range) ? 1 : 0;
       if (sws_ctx_) {
         sws_freeContext(sws_ctx_);
       }
       sws_ctx_ = sws_getContext(src->width,
                                src->height,
-                               static_cast<AVPixelFormat>(src->format),
+                               src_pix_fmt,
                                src->width,
                                src->height,
                                AV_PIX_FMT_YUV420P,
@@ -443,6 +566,13 @@ class Player {
                                nullptr,
                                nullptr,
                                nullptr);
+      if (!sws_ctx_) {
+        js_on_log(3, "sws_getContext failed for video frame conversion.");
+        return;
+      }
+
+      const int* coeffs = sws_getCoefficients(SWS_CS_DEFAULT);
+      sws_setColorspaceDetails(sws_ctx_, coeffs, src_full_range, coeffs, 0, 0, 1 << 16, 1 << 16);
 
       if (video_frame_yuv_) {
         av_frame_free(&video_frame_yuv_);
@@ -566,6 +696,9 @@ class Player {
   double current_time_ms_ = 0.0;
   int video_stream_index_ = -1;
   int audio_stream_index_ = -1;
+  int64_t last_video_dts_us_ = AV_NOPTS_VALUE;
+  int64_t last_audio_dts_us_ = AV_NOPTS_VALUE;
+  bool waiting_for_video_keyframe_ = true;
 
   std::vector<uint8_t> init_segment_;
   std::vector<uint8_t> segment_buffer_;
