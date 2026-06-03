@@ -17,6 +17,7 @@ export declare class HlsController {
     /** 防止多 #EXT-X-MAP:URI= */
     mapList: Map<any, any>;
     _onVisible: () => void;
+    enablePreloadHintFetch: boolean;
     constructor({ lowLatencyMode, followRedirectUrl, requestInit, fetchTimeout, onSegment, onDuration, onError }: HlsControllerOptions);
     start(playlistUrl: string): Promise<void>;
     seek(targetTimeSec: number): Promise<number>;

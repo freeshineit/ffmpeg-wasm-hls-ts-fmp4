@@ -1291,6 +1291,7 @@
             this.totalDuration = 0;
             this.isMaster = false;
             this.tracks = [];
+            this.enablePreloadHintFetch = false;
             this._onVisible = () => {
                 if (document.visibilityState === "visible") {
                     for (const t of this.tracks) {
@@ -1474,13 +1475,14 @@
                 throw new Error(`Failed to fetch init segment: ${info.initSegment}`);
             // url(part or segment) list
             const candidates = [];
+            const shouldCountDuration = track.kind === "video" || track.kind === "muxed";
             const useParts = this.lowLatencyMode && info.parts.length > 0;
             if (useParts) {
                 for (const part of info.parts) {
                     candidates.push(part.url);
                     if (track.seen.has(part.url))
                         continue;
-                    if (part.duration > 0) {
+                    if (shouldCountDuration && part.duration > 0) {
                         this.totalDuration += part.duration;
                         this.onDuration(this.totalDuration);
                     }
@@ -1491,13 +1493,13 @@
                     candidates.push(seg.url);
                     if (track.seen.has(seg.url))
                         continue;
-                    if (seg.duration > 0) {
+                    if (shouldCountDuration && seg.duration > 0) {
                         this.totalDuration += seg.duration;
                         this.onDuration(this.totalDuration);
                     }
                 }
             }
-            if (useParts && info.preloadHint)
+            if (this.enablePreloadHintFetch && useParts && info.preloadHint)
                 candidates.push(info.preloadHint);
             for (const url of candidates) {
                 if (track.seen.has(url))
