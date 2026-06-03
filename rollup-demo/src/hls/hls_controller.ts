@@ -27,6 +27,9 @@ export class HlsController {
   mapList = new Map();
 
   _onVisible: () => void;
+  // PRELOAD-HINT often points to a not-yet-complete object. Fetching and
+  // feeding it as a normal segment can inject truncated media into demux.
+  enablePreloadHintFetch: boolean;
 
   constructor({ lowLatencyMode = true, followRedirectUrl = true, requestInit = null, fetchTimeout = 30000, onSegment, onDuration, onError }: HlsControllerOptions) {
     this.lowLatencyMode = lowLatencyMode;
@@ -42,6 +45,7 @@ export class HlsController {
 
     this.isMaster = false;
     this.tracks = [];
+    this.enablePreloadHintFetch = false;
 
     this._onVisible = () => {
       if (document.visibilityState === "visible") {
@@ -237,12 +241,13 @@ export class HlsController {
 
     // url(part or segment) list
     const candidates: string[] = [];
+    const shouldCountDuration = track.kind === "video" || track.kind === "muxed";
     const useParts = this.lowLatencyMode && info.parts.length > 0;
     if (useParts) {
       for (const part of info.parts) {
         candidates.push(part.url);
         if (track.seen.has(part.url)) continue;
-        if (part.duration > 0) {
+        if (shouldCountDuration && part.duration > 0) {
           this.totalDuration += part.duration;
           this.onDuration(this.totalDuration);
         }
@@ -251,13 +256,13 @@ export class HlsController {
       for (const seg of info.segments) {
         candidates.push(seg.url);
         if (track.seen.has(seg.url)) continue;
-        if (seg.duration > 0) {
+        if (shouldCountDuration && seg.duration > 0) {
           this.totalDuration += seg.duration;
           this.onDuration(this.totalDuration);
         }
       }
     }
-    if (useParts && info.preloadHint) candidates.push(info.preloadHint);
+    if (this.enablePreloadHintFetch && useParts && info.preloadHint) candidates.push(info.preloadHint);
 
     for (const url of candidates) {
       if (track.seen.has(url)) continue;
