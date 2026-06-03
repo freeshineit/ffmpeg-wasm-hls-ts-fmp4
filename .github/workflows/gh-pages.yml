@@ -18,13 +18,14 @@ jobs:
         with:
           version: 8
 
-      - name: Build web
-        working-directory: ./web
+      - name: Build rollup-demo
+        working-directory: ./rollup-demo
         run: |
           rm -rf node_modules
           pnpm install --frozen-lockfile
           pnpm run build
           mv dist ../docs
+          cp -rf public/* ../docs
         env:
           CI: false
       # - name: Copy static files to docs
