@@ -1,0 +1,71 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-web:
+    name: Build rollup demo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rollup-demo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rollup-demo/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollup-demo-dist
+          path: rollup-demo/dist
+          if-no-files-found: error
+
+  build-wasm:
+    name: Build wasm decoder
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: cpp
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure build scripts are executable
+        run: chmod +x docker-build.sh build_ffmpeg_wasm.sh
+
+      - name: Build decoder with Docker
+        run: ./docker-build.sh
+
+      - name: Upload wasm artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: decoder-wasm
+          path: |
+            cpp/build/decoder.js
+            cpp/build/decoder.wasm
+          if-no-files-found: error
