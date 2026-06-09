@@ -22,7 +22,11 @@
 前提：
 - macOS/Linux
 - Emscripten SDK 已安装并 `source emsdk_env.sh`
-- 默认使用 FFmpeg 7.1（优先 `cpp/ffmpeg-7.1`，不存在则自动下载）
+- 默认使用 FFmpeg 8.1（优先 `cpp/ffmpeg-8.1`，不存在则自动下载到 `cpp/build_ffmpeg/src/ffmpeg-8.1`）
+
+SIMD 相关：
+- 默认 `SIMD_MODE=auto`，会自动探测当前 emcc 是否支持 `-msimd128`。
+- 可强制指定：`SIMD_MODE=on` 或 `SIMD_MODE=off`。
 
 执行：
 
@@ -32,6 +36,15 @@ chmod +x build_ffmpeg_wasm.sh
 ./build_ffmpeg_wasm.sh
 ```
 
+或通过 make 传递 SIMD 参数：
+
+```bash
+cd cpp
+make SIMD_MODE=auto ffmpeg
+make SIMD_MODE=on ffmpeg
+make SIMD_MODE=off ffmpeg
+```
+
 编译后输出：`cpp/third_party/ffmpeg-wasm`
 
 ## 二、编译播放器 wasm（默认 make，不使用 CMake）
@@ -39,6 +52,15 @@ chmod +x build_ffmpeg_wasm.sh
 ```bash
 cd cpp
 make
+```
+
+可选 SIMD 参数：
+
+```bash
+cd cpp
+make SIMD_MODE=auto wasm
+make SIMD_MODE=on wasm
+make SIMD_MODE=off wasm
 ```
 
 仅重编 wasm（不重编 FFmpeg）：
@@ -52,12 +74,14 @@ make wasm
 - `cpp/build/decoder.js`
 - `cpp/build/decoder.wasm`
 
+说明：`decoder.js` 首行 banner 会标记本次构建的 SIMD 状态（`simd on` 或 `simd off`）。
+
 将它们拷贝到 Web 静态目录：
 
 ```bash
-mkdir -p web/public/wasm
-cp cpp/build/decoder.js web/public/wasm/
-cp cpp/build/decoder.wasm web/public/wasm/
+mkdir -p rollup-demo/public/wasm
+cp cpp/build/decoder.js rollup-demo/public/wasm/
+cp cpp/build/decoder.wasm rollup-demo/public/wasm/
 ```
 
 或使用：

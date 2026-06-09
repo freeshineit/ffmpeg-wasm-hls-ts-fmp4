@@ -40,6 +40,13 @@ cpp/
 
 ## 构建方式
 
+当前构建脚本支持按环境自动开启 SIMD。
+
+- `SIMD_MODE=auto`（默认）：自动探测 emcc 是否支持 `-msimd128`。
+- `SIMD_MODE=on`：强制开启 SIMD。
+- `SIMD_MODE=off`：强制关闭 SIMD。
+- `HLS_WASM_SIMD`（0/1）优先级高于 `SIMD_MODE`，主要由 Makefile 在内部传递预计算结果。
+
 ### 方式一：Docker 构建
 
 无需安装 Emscripten SDK，只依赖 Docker。
@@ -94,6 +101,22 @@ make wasm
 make clean
 ```
 
+带 SIMD 参数的示例：
+
+```bash
+make SIMD_MODE=auto all
+make SIMD_MODE=on ffmpeg wasm
+make SIMD_MODE=off wasm
+```
+
+如果需要直接调用脚本：
+
+```bash
+SIMD_MODE=auto ./build_ffmpeg_wasm.sh
+SIMD_MODE=on ./build_ffmpeg_wasm.sh
+SIMD_MODE=off ./build_ffmpeg_wasm.sh
+```
+
 ## 编译产物的运行特性
 
 当前编译参数的重要点如下：
@@ -101,6 +124,7 @@ make clean
 - 产物是 `-sMODULARIZE=1`，因此 `decoder.js` 导出的是一个异步工厂函数，不是立即可用的全局实例。
 - 导出名称是 `HlsPlayerModule`。
 - 运行环境限定为 `web`。
+- 根据环境与 `SIMD_MODE`，会自动决定是否附加 `-msimd128`。
 - 仅导出了 `_malloc`、`_free`、`_player_create`、`_player_destroy`、`_player_feed_segment`、`_player_reset`、`_player_get_current_time`。
 - 仅导出了运行时方法 `HEAPU8`，没有导出 `ccall`、`cwrap`、`HEAPF32`。
 - wasm 文件路径依赖 `locateFile('decoder.wasm')` 解析，因此部署时通常需要显式提供 `locateFile`。

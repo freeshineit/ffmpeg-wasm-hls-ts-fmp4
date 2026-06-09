@@ -5,12 +5,27 @@ BUILD_DIR := $(ROOT_DIR)/build
 FFMPEG_PREFIX := $(ROOT_DIR)/third_party/ffmpeg-wasm
 FFMPEG_VERSION ?= 8.1
 BUILD_DATE_UTC := $(shell date -u "+%Y-%m-%d %H:%M:%S")
-BANNER_TEXT := /*! hls-wasm2 decoder.js | ffmpeg $(FFMPEG_VERSION) | build-date $(BUILD_DATE_UTC) */
+SIMD_MODE ?= auto
+SIMD_TEST_MARKER := $(shell mktemp /tmp/hls-wasm2-simd-check.XXXXXX 2>/dev/null || echo /tmp/hls-wasm2-simd-check)
+SIMD_AVAILABLE := $(shell MODE="$(SIMD_MODE)"; MARKER="$(SIMD_TEST_MARKER)"; \
+	if [ "$$MODE" = "off" ] || [ "$$MODE" = "0" ]; then \
+		echo 0; \
+	elif [ "$$MODE" = "on" ] || [ "$$MODE" = "1" ]; then \
+		echo 1; \
+	elif command -v emcc >/dev/null 2>&1 && printf 'int main(void){return 0;}' | emcc -msimd128 -x c - -c -o "$$MARKER.o" >/dev/null 2>&1; then \
+		rm -f "$$MARKER.o" "$$MARKER"; \
+		echo 1; \
+	else \
+		rm -f "$$MARKER.o" "$$MARKER"; \
+		echo 0; \
+	fi)
+SIMD_FLAGS := $(if $(filter 1,$(SIMD_AVAILABLE)),-msimd128,)
+BANNER_TEXT := /*! hls-wasm2 decoder.js | ffmpeg $(FFMPEG_VERSION) | simd $(if $(filter 1,$(SIMD_AVAILABLE)),on,off) | build-date $(BUILD_DATE_UTC) */
 OUT_JS := $(BUILD_DIR)/decoder.js
 OUT_WASM := $(BUILD_DIR)/decoder.wasm
 
 CXX := em++
-CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables
+CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables $(SIMD_FLAGS)
 INCLUDES := -I$(ROOT_DIR)/include -I$(FFMPEG_PREFIX)/include
 LIBS := -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lavutil -lswresample -lswscale
 
@@ -35,7 +50,8 @@ EM_FLAGS := \
 	-sMALLOC=emmalloc \
 	-sINCOMING_MODULE_JS_API="['locateFile']" \
 	-sEXPORTED_FUNCTIONS="['_malloc','_free','_player_create','_player_destroy','_player_feed_segment','_player_reset','_player_get_current_time']" \
-	-sEXPORTED_RUNTIME_METHODS="['HEAPU8']"
+	-sEXPORTED_RUNTIME_METHODS="['HEAPU8']" \
+	$(SIMD_FLAGS)
 
 .PHONY: all ffmpeg wasm clean install-web docker-build docker-ffmpeg docker-wasm docker-shell
 
@@ -43,9 +59,10 @@ all: ffmpeg wasm
 
 ffmpeg:
 	@chmod +x $(ROOT_DIR)/build_ffmpeg_wasm.sh
-	@$(ROOT_DIR)/build_ffmpeg_wasm.sh
+	@SIMD_MODE=$(SIMD_MODE) HLS_WASM_SIMD=$(SIMD_AVAILABLE) $(ROOT_DIR)/build_ffmpeg_wasm.sh
 
 wasm: $(OUT_JS)
+	@echo "[wasm] SIMD mode=$(SIMD_MODE), enabled=$(if $(filter 1,$(SIMD_AVAILABLE)),yes,no)"
 
 $(OUT_JS): $(ROOT_DIR)/src/decoder.cpp $(ROOT_DIR)/include/decoder.h
 	@mkdir -p $(BUILD_DIR)

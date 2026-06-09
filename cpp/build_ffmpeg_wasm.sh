@@ -30,10 +30,41 @@ if ! command -v emconfigure >/dev/null 2>&1; then
   exit 1
 fi
 
+SIMD_MODE="${SIMD_MODE:-auto}"
+SIMD_ENABLED="${HLS_WASM_SIMD:-}"
+
+# SIMD_MODE controls detection behavior:
+#   auto (default): probe current emcc for -msimd128 support.
+#   on / 1: force enable SIMD flags.
+#   off / 0: force disable SIMD flags.
+# HLS_WASM_SIMD has higher priority when provided (0 or 1), and is intended
+# for callers (such as Makefile) to pass a precomputed detection result.
+
+if [[ -z "${SIMD_ENABLED}" ]]; then
+  if [[ "${SIMD_MODE}" == "off" || "${SIMD_MODE}" == "0" ]]; then
+    SIMD_ENABLED="0"
+  elif [[ "${SIMD_MODE}" == "on" || "${SIMD_MODE}" == "1" ]]; then
+    SIMD_ENABLED="1"
+  elif printf 'int main(void){return 0;}' | emcc -msimd128 -x c - -c -o /tmp/hls-wasm2-ffmpeg-simd-check.o >/dev/null 2>&1; then
+    SIMD_ENABLED="1"
+    rm -f /tmp/hls-wasm2-ffmpeg-simd-check.o
+  else
+    SIMD_ENABLED="0"
+    rm -f /tmp/hls-wasm2-ffmpeg-simd-check.o
+  fi
+fi
+
+if [[ "${SIMD_ENABLED}" == "1" ]]; then
+  SIMD_FLAGS="-msimd128"
+else
+  SIMD_FLAGS=""
+fi
+
 mkdir -p "${FFMPEG_OUT_DIR}"
 
 echo "[2/3] Configuring FFmpeg..."
 echo "Using FFmpeg source: ${FFMPEG_SRC_DIR}"
+echo "SIMD mode: ${SIMD_MODE}, enabled: ${SIMD_ENABLED}"
 cd "${FFMPEG_SRC_DIR}"
 
 emconfigure ./configure \
@@ -80,8 +111,8 @@ emconfigure ./configure \
   --enable-bsf=extract_extradata \
   --enable-swresample \
   --enable-swscale \
-  --extra-cflags="-Oz -ffunction-sections -fdata-sections" \
-  --extra-cxxflags="-Oz -ffunction-sections -fdata-sections" \
+  --extra-cflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}" \
+  --extra-cxxflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}" \
   --extra-ldflags="-Wl,--gc-sections"
 
 # Use nproc (Linux) or sysctl (macOS) for parallel job count
