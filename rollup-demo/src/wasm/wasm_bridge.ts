@@ -42,7 +42,7 @@ export class WasmBridge {
               null, payload.yStride, // We don't have pointers anymore, we pass arrays in player.js directly soon
               null, payload.uStride,
               null, payload.vStride,
-              payload.ptsMs, payload.isKeyFrame, payload.codecName,
+              payload.ptsMs, payload.fps, payload.isKeyFrame, payload.codecName,
               payload.y, payload.u, payload.v // Pass arrays to player.js
             );
             break;

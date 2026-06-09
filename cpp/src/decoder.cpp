@@ -34,11 +34,12 @@ EM_JS(void, js_on_video_frame,
        int v_ptr,
        int v_stride,
        double pts_ms,
+       double fps,
        int is_key_frame,
        const char* codec_name),
       {
         if (Module.onVideoFrame) {
-          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms, is_key_frame, UTF8ToString(codec_name));
+          Module.onVideoFrame(width, height, y_ptr, y_stride, u_ptr, u_stride, v_ptr, v_stride, pts_ms, fps, is_key_frame, UTF8ToString(codec_name));
         }
       });
 
@@ -138,6 +139,28 @@ static bool isTimestampDiscontinuity(int64_t previous_dts_us, int64_t current_dt
          current_dts_us - previous_dts_us > kForwardToleranceUs;
 }
 
+static double streamFrameRateToFps(const AVStream* stream) {
+  if (!stream) {
+    return 0.0;
+  }
+
+  const AVRational candidates[] = {
+      stream->avg_frame_rate,
+      stream->r_frame_rate,
+  };
+
+  for (const AVRational& rate : candidates) {
+    if (rate.num > 0 && rate.den > 0) {
+      const double fps = av_q2d(rate);
+      if (fps > 0.0) {
+        return fps;
+      }
+    }
+  }
+
+  return 0.0;
+}
+
 class Player {
  public:
   ~Player() { reset(); }
@@ -200,6 +223,7 @@ class Player {
     segment_buffer_.clear();
     video_stream_index_ = -1;
     audio_stream_index_ = -1;
+    video_fps_ = 0.0;
     last_video_dts_us_ = AV_NOPTS_VALUE;
     last_audio_dts_us_ = AV_NOPTS_VALUE;
     waiting_for_video_keyframe_ = true;
@@ -390,6 +414,8 @@ class Player {
       // LL-HLS/fMP4 fragments may provide non frame-complete access units.
       video_dec_ctx_->flags2 |= AV_CODEC_FLAG2_CHUNKS;
     }
+
+    video_fps_ = streamFrameRateToFps(stream);
 
     if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
       // Keep decoding through damaged HEVC NAL units when possible.
@@ -614,6 +640,7 @@ class Player {
                       reinterpret_cast<intptr_t>(video_frame_yuv_->data[2]),
                       video_frame_yuv_->linesize[2],
                       pts_ms,
+                      video_fps_,
                       (src->flags & AV_FRAME_FLAG_KEY) || src->pict_type == AV_PICTURE_TYPE_I ? 1 : 0,
                       video_dec_ctx_->codec && video_dec_ctx_->codec->name ? video_dec_ctx_->codec->name : "unknown");
   }
@@ -696,6 +723,7 @@ class Player {
   double current_time_ms_ = 0.0;
   int video_stream_index_ = -1;
   int audio_stream_index_ = -1;
+  double video_fps_ = 0.0;
   int64_t last_video_dts_us_ = AV_NOPTS_VALUE;
   int64_t last_audio_dts_us_ = AV_NOPTS_VALUE;
   bool waiting_for_video_keyframe_ = true;

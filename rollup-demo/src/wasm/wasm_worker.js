@@ -61,7 +61,7 @@ async function initWasm({ wasmJsUrl, wasmFileUrl }) {
       }
       return path;
     },
-    onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, isKeyFrame, codecName) => {
+    onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, fps, isKeyFrame, codecName) => {
       // --- Validate frame metadata before touching memory ---
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
       if (width > MAX_FRAME_WIDTH || height > MAX_FRAME_HEIGHT) {
@@ -99,7 +99,7 @@ async function initWasm({ wasmJsUrl, wasmFileUrl }) {
 
       self.postMessage({
         type: 'videoFrame',
-        payload: { width, height, y, u, v, yStride, uStride, vStride, ptsMs, isKeyFrame, codecName }
+        payload: { width, height, y, u, v, yStride, uStride, vStride, ptsMs, fps, isKeyFrame, codecName }
       }, [y.buffer, u.buffer, v.buffer]); // Transfer buffer ownership
     },
     onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs, codecName) => {

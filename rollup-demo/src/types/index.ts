@@ -35,7 +35,7 @@ export interface ISegmentInfo {
   id: number;
   segmentUrl: string;
   byteLength: number;
-  videoInfo: { width: number; height: number; yStride: number; uStride: number; vStride: number; ptsMs: number; codecName: string } | null;
+  videoInfo: { width: number; height: number; yStride: number; uStride: number; vStride: number; ptsMs: number; fps: number; codecName: string } | null;
   audioInfo: { channels: number; sampleRate: number; sampleCount: number; ptsMs: number; codecName: string } | null;
   printed: boolean;
   createdAt: number;
@@ -133,6 +133,7 @@ export type WasmOnVideoFrame = (
   vPtr: number | null,
   vStride: number,
   ptsMs: number,
+  fps: number,
   isKeyFrame: boolean,
   codecName: string,
   yData: Uint8Array,
