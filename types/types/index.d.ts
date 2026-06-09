@@ -38,6 +38,7 @@ export interface ISegmentInfo {
         uStride: number;
         vStride: number;
         ptsMs: number;
+        fps: number;
         codecName: string;
     } | null;
     audioInfo: {
@@ -120,7 +121,7 @@ export interface WasmBridgeOptions {
     wasmJsUrl: string;
     wasmFileUrl: string;
 }
-export type WasmOnVideoFrame = (width: number, height: number, yPtr: number | null, yStride: number, uPtr: number | null, uStride: number, vPtr: number | null, vStride: number, ptsMs: number, isKeyFrame: boolean, codecName: string, yData: Uint8Array, uData: Uint8Array, vData: Uint8Array) => void;
+export type WasmOnVideoFrame = (width: number, height: number, yPtr: number | null, yStride: number, uPtr: number | null, uStride: number, vPtr: number | null, vStride: number, ptsMs: number, fps: number, isKeyFrame: boolean, codecName: string, yData: Uint8Array, uData: Uint8Array, vData: Uint8Array) => void;
 export type WasmOnAudioFrame = (channels: number, sampleRate: number, sampleCount: number, dataPtr: number | null, ptsMs: number, codecName: string, pcmData: Float32Array) => void;
 export type WasmOnLog = (level: string, msg: string) => void;
 export interface WasmInitCallbacks {

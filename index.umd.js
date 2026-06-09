@@ -1657,7 +1657,7 @@
                             break;
                         case 'videoFrame':
                             onVideoFrame(payload.width, payload.height, null, payload.yStride, // We don't have pointers anymore, we pass arrays in player.js directly soon
-                            null, payload.uStride, null, payload.vStride, payload.ptsMs, payload.isKeyFrame, payload.codecName, payload.y, payload.u, payload.v // Pass arrays to player.js
+                            null, payload.uStride, null, payload.vStride, payload.ptsMs, payload.fps, payload.isKeyFrame, payload.codecName, payload.y, payload.u, payload.v // Pass arrays to player.js
                             );
                             break;
                         case 'audioFrame':
@@ -1997,11 +1997,15 @@
                     this.log(`[audio] ${err.message}`);
                 });
                 await this.wasm.init({
-                    onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, isKeyFrame, codecName, yData, uData, vData) => {
+                    onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, fps, isKeyFrame, codecName, yData, uData, vData) => {
                         const y = yData;
                         const u = uData;
                         const v = vData;
                         const normalizedPtsMs = __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_normalizeVideoPts).call(this, ptsMs);
+                        const normalizedFps = Number.isFinite(fps) && fps > 0 ? fps : 0;
+                        if (normalizedFps > 0) {
+                            this.videoFrameDurMs = 1000 / normalizedFps;
+                        }
                         __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enqueueVideoFrame).call(this, {
                             width,
                             height,
@@ -2022,7 +2026,7 @@
                         if (!this._avGateOpen) {
                             __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_openAvGate).call(this);
                         }
-                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_logSegmentVideoInfo).call(this, width, height, yStride, uStride, vStride, normalizedPtsMs, codecName);
+                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_logSegmentVideoInfo).call(this, width, height, yStride, uStride, vStride, normalizedPtsMs, normalizedFps, codecName);
                     },
                     onAudioFrame: (channels, sampleRate, sampleCount, dataPtr, ptsMs, codecName, pcmData) => {
                         const pcm = pcmData;
@@ -2523,7 +2527,7 @@
         }
         this.lastAudioNormPtsMs += Math.max(5, stepMs);
         return this.lastAudioNormPtsMs;
-    }, _HlsWasmPlayer_logSegmentVideoInfo = function _HlsWasmPlayer_logSegmentVideoInfo(width, height, yStride, uStride, vStride, ptsMs, codecName) {
+    }, _HlsWasmPlayer_logSegmentVideoInfo = function _HlsWasmPlayer_logSegmentVideoInfo(width, height, yStride, uStride, vStride, ptsMs, fps, codecName) {
         const ctx = this.segmentInfoQueue.find((item) => !item.videoInfo);
         if (!ctx) {
             return;
@@ -2535,6 +2539,7 @@
             uStride,
             vStride,
             ptsMs,
+            fps,
             codecName: codecName || "unknown",
         };
         __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_flushSegmentInfo).call(this, ctx, false);
@@ -2559,7 +2564,7 @@
             return;
         }
         const videoText = ctx.videoInfo
-            ? `videoInfo(codec=${ctx.videoInfo.codecName} width=${ctx.videoInfo.width} height=${ctx.videoInfo.height} y=${ctx.videoInfo.yStride} u=${ctx.videoInfo.uStride} v=${ctx.videoInfo.vStride} pts=${ctx.videoInfo.ptsMs.toFixed(2)}ms)`
+            ? `videoInfo(codec=${ctx.videoInfo.codecName} width=${ctx.videoInfo.width} height=${ctx.videoInfo.height} y=${ctx.videoInfo.yStride} u=${ctx.videoInfo.uStride} v=${ctx.videoInfo.vStride} pts=${ctx.videoInfo.ptsMs.toFixed(2)}ms fps=${ctx.videoInfo.fps.toFixed(3)})`
             : "videoInfo(n/a)";
         const audioText = ctx.audioInfo
             ? `audioInfo(codec=${ctx.audioInfo.codecName} channels=${ctx.audioInfo.channels} sampleRate=${ctx.audioInfo.sampleRate} samples=${ctx.audioInfo.sampleCount} pts=${ctx.audioInfo.ptsMs.toFixed(2)}ms)`
