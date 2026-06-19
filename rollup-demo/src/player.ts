@@ -45,6 +45,9 @@ export class HlsWasmPlayer {
   maxPendingSegmentInfo: number = 60;
   maxSegmentInfoAgeMs: number = 30_000;
   hevcCompatFallbackTriggered: boolean = false;
+  waitingForRecoveryKeyFrame: boolean = false;
+  rejectedVideoFrames: number = 0;
+  lastCorruptLogAt: number = 0;
   _totalDuration: number = 0;
   _seekBaseTime: number = 0;
   _currentSrc: string = "";
@@ -122,6 +125,9 @@ export class HlsWasmPlayer {
     this.maxPendingSegmentInfo = 60;
     this.maxSegmentInfoAgeMs = 30_000; // evict entries older than 30s
     this.hevcCompatFallbackTriggered = false;
+    this.waitingForRecoveryKeyFrame = false;
+    this.rejectedVideoFrames = 0;
+    this.lastCorruptLogAt = 0;
     this._totalDuration = 0;
     this._seekBaseTime = 0;
 
@@ -307,11 +313,7 @@ export class HlsWasmPlayer {
           const normalizedPtsMs = this.#normalizeVideoPts(ptsMs);
           const normalizedFps = Number.isFinite(fps) && fps > 0 ? fps : 0;
 
-          if (normalizedFps > 0) {
-            this.videoFrameDurMs = 1000 / normalizedFps;
-          }
-
-          this.#enqueueVideoFrame({
+          const frame: IVideoFrame = {
             width,
             height,
             y,
@@ -322,7 +324,28 @@ export class HlsWasmPlayer {
             vStride,
             ptsMs: normalizedPtsMs,
             isKeyFrame: !!isKeyFrame,
-          });
+          };
+
+          if (!this.#isValidDecodedVideoFrame(frame)) {
+            this.#enterRecoveryMode("invalid decoded video frame");
+            return;
+          }
+
+          if (this.waitingForRecoveryKeyFrame) {
+            if (!frame.isKeyFrame) {
+              this.rejectedVideoFrames += 1;
+              return;
+            }
+            this.waitingForRecoveryKeyFrame = false;
+            this.videoQueue.length = 0;
+            this.log("[compat] Recovered video decode on keyframe.");
+          }
+
+          if (normalizedFps > 0) {
+            this.videoFrameDurMs = 1000 / normalizedFps;
+          }
+
+          this.#enqueueVideoFrame(frame);
 
           if (isKeyFrame && this.onIFrame) {
             this.onIFrame(normalizedPtsMs);
@@ -402,6 +425,9 @@ export class HlsWasmPlayer {
     this._emit("loadstart", { src: url, mode: this._currentMode });
 
     this.hevcCompatFallbackTriggered = false;
+    this.waitingForRecoveryKeyFrame = false;
+    this.rejectedVideoFrames = 0;
+    this.lastCorruptLogAt = 0;
     this.running = true;
     this.videoQueue.length = 0;
     this.videoClockOffsetSec = null;
@@ -422,7 +448,7 @@ export class HlsWasmPlayer {
     // prevent massive frame-drop storms when rAF was suspended.
     document.addEventListener("visibilitychange", this._onVisibilityBound);
 
-    this.playlist.start(url, this._currentMode);
+    this.playlist.start(url);
     this.#startTimeUpdate();
   }
 
@@ -450,6 +476,9 @@ export class HlsWasmPlayer {
     this.videoFrameDurMs = 33.33;
     this.lastAudioRawPtsMs = null;
     this.lastAudioNormPtsMs = null;
+    this.waitingForRecoveryKeyFrame = false;
+    this.rejectedVideoFrames = 0;
+    this.lastCorruptLogAt = 0;
     this.#flushPendingSegmentInfos();
     this.segmentInfoQueue.length = 0;
     this._lastRenderedFramePtsSec = null;
@@ -519,6 +548,9 @@ export class HlsWasmPlayer {
     this.lastAudioNormPtsMs = null;
     this.droppedVideoFrames = 0;
     this.lastDropLogAt = 0;
+    this.waitingForRecoveryKeyFrame = false;
+    this.rejectedVideoFrames = 0;
+    this.lastCorruptLogAt = 0;
     this._lastRenderedFramePtsSec = null;
 
     const segmentStart = await this.playlist.seek(timeSec);
@@ -616,6 +648,35 @@ export class HlsWasmPlayer {
     this.videoQueue.push(frame);
   }
 
+  #isValidDecodedVideoFrame(frame: IVideoFrame): boolean {
+    const { width, height, y, u, v, yStride, uStride, vStride, ptsMs } = frame;
+    if (!Number.isFinite(ptsMs)) return false;
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return false;
+    if (!Number.isInteger(yStride) || !Number.isInteger(uStride) || !Number.isInteger(vStride)) return false;
+    if (width <= 0 || height <= 0) return false;
+    if ((width & 1) !== 0 || (height & 1) !== 0) return false;
+
+    const cw = width >> 1;
+    const ch = height >> 1;
+    if (yStride < width || uStride < cw || vStride < cw) return false;
+    if (y.length < yStride * height) return false;
+    if (u.length < uStride * ch) return false;
+    if (v.length < vStride * ch) return false;
+    return true;
+  }
+
+  #enterRecoveryMode(reason: string): void {
+    this.waitingForRecoveryKeyFrame = true;
+    this.videoQueue.length = 0;
+    this.rejectedVideoFrames += 1;
+
+    const now = performance.now();
+    if (now - this.lastCorruptLogAt > 1000) {
+      this.lastCorruptLogAt = now;
+      this.log(`[compat] Dropped corrupt video frame: ${reason}. Waiting for next keyframe.`);
+    }
+  }
+
   #startRenderLoop(): void {
     if (this.renderRafId) {
       cancelAnimationFrame(this.renderRafId);
@@ -657,7 +718,11 @@ export class HlsWasmPlayer {
             droppedThisTick += 1;
             continue;
           }
-          this.renderer.renderYuv420(head);
+          const rendered = this.renderer.renderYuv420(head);
+          if (!rendered) {
+            this.#enterRecoveryMode("renderer rejected corrupted frame");
+            continue;
+          }
           this._lastRenderedFramePtsSec = headPtsSec;
           lastRenderWallSec = nowSec;
           this.#maybeMarkEnded();
@@ -675,7 +740,12 @@ export class HlsWasmPlayer {
           const head = this.videoQueue.shift();
           if (!head) return;
           const headPtsSec = head.ptsMs / 1000;
-          this.renderer.renderYuv420(head);
+          const rendered = this.renderer.renderYuv420(head);
+          if (!rendered) {
+            this.#enterRecoveryMode("renderer rejected corrupted frame");
+            this.renderRafId = requestAnimationFrame(tick);
+            return;
+          }
           this._lastRenderedFramePtsSec = headPtsSec;
           lastRenderWallSec = nowSec;
           this.#maybeMarkEnded();

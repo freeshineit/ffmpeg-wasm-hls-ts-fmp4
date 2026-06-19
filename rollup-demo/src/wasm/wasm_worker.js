@@ -7,6 +7,7 @@ let playerHandle = 0;
 const MAX_FRAME_WIDTH = 8192;
 const MAX_FRAME_HEIGHT = 4320;
 const MAX_PLANE_BYTES = 256 * 1024 * 1024; // 256 MiB per plane
+const MAX_FRAME_PIXELS = MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT;
 const MAX_AUDIO_SAMPLES = 192000; // 4s @ 48kHz mono
 const MAX_AUDIO_CHANNELS = 8;
 
@@ -64,8 +65,39 @@ async function initWasm({ wasmJsUrl, wasmFileUrl }) {
     onVideoFrame: (width, height, yPtr, yStride, uPtr, uStride, vPtr, vStride, ptsMs, fps, isKeyFrame, codecName) => {
       // --- Validate frame metadata before touching memory ---
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+      if (!Number.isInteger(width) || !Number.isInteger(height)) return;
       if (width > MAX_FRAME_WIDTH || height > MAX_FRAME_HEIGHT) {
         self.postMessage({ type: 'log', payload: { level: 'warn', msg: `[wasm_worker] Rejected oversize video frame ${width}x${height}` } });
+        return;
+      }
+      if (width * height > MAX_FRAME_PIXELS) {
+        self.postMessage({ type: 'log', payload: { level: 'warn', msg: `[wasm_worker] Rejected oversized pixel count ${width}x${height}` } });
+        return;
+      }
+
+      // YUV420P requires even luma dimensions; odd values indicate broken frame metadata.
+      if ((width & 1) !== 0 || (height & 1) !== 0) {
+        self.postMessage({ type: 'log', payload: { level: 'warn', msg: `[wasm_worker] Rejected odd-sized YUV420 frame ${width}x${height}` } });
+        return;
+      }
+
+      if (!Number.isFinite(yStride) || !Number.isFinite(uStride) || !Number.isFinite(vStride)) {
+        return;
+      }
+      if (!Number.isInteger(yStride) || !Number.isInteger(uStride) || !Number.isInteger(vStride)) {
+        return;
+      }
+
+      const cw = width >> 1;
+      if (yStride < width || uStride < cw || vStride < cw) {
+        self.postMessage({ type: 'log', payload: { level: 'warn', msg: `[wasm_worker] Rejected invalid stride y=${yStride} u=${uStride} v=${vStride} for ${width}x${height}` } });
+        return;
+      }
+
+      if (!Number.isFinite(yPtr) || !Number.isFinite(uPtr) || !Number.isFinite(vPtr)) {
+        return;
+      }
+      if (!Number.isInteger(yPtr) || !Number.isInteger(uPtr) || !Number.isInteger(vPtr)) {
         return;
       }
 

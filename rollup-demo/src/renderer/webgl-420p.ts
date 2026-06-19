@@ -122,14 +122,21 @@ export class WebGlRender {
    *
    * @param {IYUV420PFrame} frame
    */
-  renderYuv420(frame: IYUV420PFrame): void {
+  renderYuv420(frame: IYUV420PFrame): boolean {
     const { width, height, y, u, v, yStride, uStride, vStride } = frame;
+    if (!this.#isValidFrame(frame)) {
+      return false;
+    }
+
     const cw = width >> 1;
     const ch = height >> 1;
 
     const yPacked = this.#packPlane(y, width, height, yStride, "_yScratch");
     const uPacked = this.#packPlane(u, cw, ch, uStride, "_uScratch");
     const vPacked = this.#packPlane(v, cw, ch, vStride, "_vScratch");
+    if (!yPacked || !uPacked || !vPacked) {
+      return false;
+    }
 
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -141,6 +148,7 @@ export class WebGlRender {
     this.vTexture.fill(cw, ch, vPacked);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return true;
   }
 
   destroy(): void {
@@ -205,7 +213,17 @@ export class WebGlRender {
    * Pack a (possibly strided) plane into a tight `width * height` buffer.
    * Reuses a per-plane scratch buffer to avoid per-frame allocations.
    */
-  #packPlane(data: Uint8Array, width: number, height: number, stride: number, scratchKey: "_yScratch" | "_uScratch" | "_vScratch"): Uint8Array {
+  #packPlane(data: Uint8Array, width: number, height: number, stride: number, scratchKey: "_yScratch" | "_uScratch" | "_vScratch"): Uint8Array | null {
+    if (stride < width || width <= 0 || height <= 0) {
+      return null;
+    }
+
+    const available = data.length;
+    const required = stride * height;
+    if (available < required) {
+      return null;
+    }
+
     if (stride === width) {
       // Already tight; upload as-is.
       return data;
@@ -221,6 +239,22 @@ export class WebGlRender {
       scratch.set(data.subarray(row * stride, row * stride + width), row * width);
     }
     return scratch.length === need ? scratch : scratch.subarray(0, need);
+  }
+
+  #isValidFrame(frame: IYUV420PFrame): boolean {
+    const { width, height, y, u, v, yStride, uStride, vStride } = frame;
+    if (!Number.isInteger(width) || !Number.isInteger(height)) return false;
+    if (!Number.isInteger(yStride) || !Number.isInteger(uStride) || !Number.isInteger(vStride)) return false;
+    if (width <= 0 || height <= 0) return false;
+    if ((width & 1) !== 0 || (height & 1) !== 0) return false;
+
+    const cw = width >> 1;
+    const ch = height >> 1;
+    if (yStride < width || uStride < cw || vStride < cw) return false;
+    if (y.length < yStride * height) return false;
+    if (u.length < uStride * ch) return false;
+    if (v.length < vStride * ch) return false;
+    return true;
   }
 
   // ---------------------------------------------------------------------------------------
