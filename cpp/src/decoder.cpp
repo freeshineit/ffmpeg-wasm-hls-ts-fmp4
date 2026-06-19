@@ -198,6 +198,9 @@ class Player {
       av_bsf_free(&video_bsf_ctx_);
       video_bsf_ctx_ = nullptr;
     }
+    if (bsf_pkt_) {
+      av_packet_free(&bsf_pkt_);
+    }
     if (video_dec_ctx_) {
       avcodec_free_context(&video_dec_ctx_);
     }
@@ -304,29 +307,7 @@ class Player {
       maybeHandleTimestampDiscontinuity(pkt, fmt->streams[pkt->stream_index]->time_base);
 
       if (pkt->stream_index == video_stream_index_ && video_dec_ctx_) {
-        if (video_bsf_ctx_) {
-          ret = av_bsf_send_packet(video_bsf_ctx_, pkt);
-          if (ret >= 0) {
-            while (true) {
-              AVPacket* bsf_pkt = av_packet_alloc();
-              ret = av_bsf_receive_packet(video_bsf_ctx_, bsf_pkt);
-              if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-                av_packet_free(&bsf_pkt);
-                break;
-              }
-              if (ret >= 0) {
-                if (shouldDecodeVideoPacket(bsf_pkt)) {
-                  decodePacket(video_dec_ctx_, bsf_pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
-                }
-              }
-              av_packet_free(&bsf_pkt);
-            }
-          }
-        } else {
-          if (shouldDecodeVideoPacket(pkt)) {
-            decodePacket(video_dec_ctx_, pkt, frame, true, fmt->streams[video_stream_index_]->time_base);
-          }
-        }
+        processVideoPacket(pkt, frame, fmt->streams[video_stream_index_]->time_base);
       } else if (pkt->stream_index == audio_stream_index_ && audio_dec_ctx_) {
         decodePacket(audio_dec_ctx_, pkt, frame, false, fmt->streams[audio_stream_index_]->time_base);
       }
@@ -394,6 +375,7 @@ class Player {
             video_bsf_ctx_->time_base_in = stream->time_base;
             if (av_bsf_init(video_bsf_ctx_) == 0) {
               par = video_bsf_ctx_->par_out;
+              bsf_pkt_ = av_packet_alloc();
             } else {
               av_bsf_free(&video_bsf_ctx_);
             }
@@ -416,13 +398,6 @@ class Player {
     }
 
     video_fps_ = streamFrameRateToFps(stream);
-
-    if (stream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
-      // Keep decoding through damaged HEVC NAL units when possible.
-      video_dec_ctx_->err_recognition |= AV_EF_IGNORE_ERR;
-    }
-
-    video_dec_ctx_->flags |= AV_CODEC_FLAG_OUTPUT_CORRUPT;
 
     ret = avcodec_open2(video_dec_ctx_, codec, nullptr);
     if (ret < 0) {
@@ -524,6 +499,31 @@ class Player {
     return true;
   }
 
+  void processVideoPacket(AVPacket* pkt, AVFrame* frame, AVRational time_base) {
+    if (!video_bsf_ctx_) {
+      if (shouldDecodeVideoPacket(pkt)) {
+        decodePacket(video_dec_ctx_, pkt, frame, true, time_base);
+      }
+      return;
+    }
+
+    if (av_bsf_send_packet(video_bsf_ctx_, pkt) < 0) {
+      return;
+    }
+
+    while (true) {
+      const int ret = av_bsf_receive_packet(video_bsf_ctx_, bsf_pkt_);
+      // Break on EAGAIN/EOF and on hard errors to avoid busy-looping/stalls.
+      if (ret < 0) {
+        break;
+      }
+      if (shouldDecodeVideoPacket(bsf_pkt_)) {
+        decodePacket(video_dec_ctx_, bsf_pkt_, frame, true, time_base);
+      }
+      av_packet_unref(bsf_pkt_);
+    }
+  }
+
   void flushVideoPipeline() {
     waiting_for_video_keyframe_ = true;
     if (video_bsf_ctx_) {
@@ -555,6 +555,14 @@ class Player {
           break;
         }
         logError("avcodec_receive_frame failed", ret);
+        break;
+      }
+
+      if (is_video && ((frame->flags & AV_FRAME_FLAG_CORRUPT) || frame->decode_error_flags != 0)) {
+        // Concealed/corrupt frames render as green or blocky artifacts. Drop them
+        // and resync at the next keyframe instead of propagating the damage.
+        av_frame_unref(frame);
+        flushVideoPipeline();
         break;
       }
 
@@ -710,6 +718,7 @@ class Player {
   AVCodecContext* video_dec_ctx_ = nullptr;
   AVCodecContext* audio_dec_ctx_ = nullptr;
   AVBSFContext* video_bsf_ctx_ = nullptr;
+  AVPacket* bsf_pkt_ = nullptr;
 
   SwsContext* sws_ctx_ = nullptr;
   SwrContext* swr_ctx_ = nullptr;

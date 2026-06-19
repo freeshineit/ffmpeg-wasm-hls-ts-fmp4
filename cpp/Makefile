@@ -24,7 +24,7 @@ BANNER_TEXT := /*! hls-wasm2 decoder.js | ffmpeg $(FFMPEG_VERSION) | simd $(if $
 OUT_JS := $(BUILD_DIR)/decoder.js
 OUT_WASM := $(BUILD_DIR)/decoder.wasm
 
-CXX := em++
+CXX := $(shell command -v ccache >/dev/null 2>&1 && echo "ccache em++" || echo "em++")
 CXXFLAGS := -std=c++17 -Oz -flto -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -fno-unwind-tables -fno-asynchronous-unwind-tables $(SIMD_FLAGS)
 INCLUDES := -I$(ROOT_DIR)/include -I$(FFMPEG_PREFIX)/include
 LIBS := -L$(FFMPEG_PREFIX)/lib -lavformat -lavcodec -lavutil -lswresample -lswscale

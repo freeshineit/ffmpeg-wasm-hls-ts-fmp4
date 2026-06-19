@@ -67,53 +67,79 @@ echo "Using FFmpeg source: ${FFMPEG_SRC_DIR}"
 echo "SIMD mode: ${SIMD_MODE}, enabled: ${SIMD_ENABLED}"
 cd "${FFMPEG_SRC_DIR}"
 
-emconfigure ./configure \
-  --prefix="${FFMPEG_OUT_DIR}" \
-  --cc=emcc \
-  --cxx=em++ \
-  --ar=emar \
-  --ranlib=emranlib \
-  --target-os=none \
-  --arch=x86_64 \
-  --enable-cross-compile \
-  --disable-x86asm \
-  --disable-inline-asm \
-  --disable-autodetect \
-  --disable-pthreads \
-  --disable-runtime-cpudetect \
-  --disable-programs \
-  --disable-doc \
-  --disable-network \
-  --disable-avdevice \
-  --disable-avfilter \
-  --disable-hwaccels \
-  --disable-iconv \
-  --disable-zlib \
-  --disable-bzlib \
-  --disable-lzma \
-  --enable-gpl \
-  --enable-version3 \
-  --enable-static \
-  --disable-shared \
-  --disable-debug \
-  --enable-small \
-  --disable-everything \
-  --enable-protocol=file \
-  --enable-demuxer=mov \
-  --enable-demuxer=mpegts \
-  --enable-parser=h264 \
-  --enable-parser=hevc \
-  --enable-decoder=h264 \
-  --enable-decoder=hevc \
-  --enable-decoder=aac \
-  --enable-bsf=hevc_mp4toannexb \
-  --enable-bsf=h264_mp4toannexb \
-  --enable-bsf=extract_extradata \
-  --enable-swresample \
-  --enable-swscale \
-  --extra-cflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}" \
-  --extra-cxxflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}" \
+# Use ccache when available to dramatically speed up repeated/full rebuilds.
+FFMPEG_CC="emcc"
+FFMPEG_CXX="em++"
+if command -v ccache >/dev/null 2>&1; then
+  FFMPEG_CC="ccache emcc"
+  FFMPEG_CXX="ccache em++"
+  echo "ccache detected: enabling compiler cache."
+fi
+
+CONFIGURE_ARGS=(
+  --prefix="${FFMPEG_OUT_DIR}"
+  --cc="${FFMPEG_CC}"
+  --cxx="${FFMPEG_CXX}"
+  --ar=emar
+  --ranlib=emranlib
+  --target-os=none
+  --arch=x86_64
+  --enable-cross-compile
+  --disable-x86asm
+  --disable-inline-asm
+  --disable-autodetect
+  --disable-pthreads
+  --disable-runtime-cpudetect
+  --disable-programs
+  --disable-doc
+  --disable-network
+  --disable-avdevice
+  --disable-avfilter
+  --disable-hwaccels
+  --disable-iconv
+  --disable-zlib
+  --disable-bzlib
+  --disable-lzma
+  --disable-pixelutils
+  --enable-gpl
+  --enable-version3
+  --enable-static
+  --disable-shared
+  --disable-debug
+  --enable-small
+  --disable-everything
+  --enable-demuxer=mov
+  --enable-demuxer=mpegts
+  --enable-parser=h264
+  --enable-parser=hevc
+  --enable-decoder=h264
+  --enable-decoder=hevc
+  --enable-decoder=aac
+  --enable-decoder=pcm_mulaw
+  --enable-decoder=pcm_alaw
+  --enable-bsf=hevc_mp4toannexb
+  --enable-bsf=h264_mp4toannexb
+  --enable-bsf=extract_extradata
+  --enable-swresample
+  --enable-swscale
+  --extra-cflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}"
+  --extra-cxxflags="-Oz -ffunction-sections -fdata-sections ${SIMD_FLAGS}"
   --extra-ldflags="-Wl,--gc-sections"
+)
+
+# Skip the (slow) reconfigure step when the flags are unchanged and a previous
+# configuration already exists. This is the biggest win for iterative rebuilds.
+CONFIGURE_SIGNATURE="$(printf '%s\n' "${CONFIGURE_ARGS[@]}" | shasum 2>/dev/null | awk '{print $1}')"
+CONFIGURE_STAMP="${FFMPEG_SRC_DIR}/.hls_wasm_configure_sig"
+
+if [[ -f "${FFMPEG_SRC_DIR}/ffbuild/config.mak" \
+   && -f "${CONFIGURE_STAMP}" \
+   && "$(cat "${CONFIGURE_STAMP}" 2>/dev/null)" == "${CONFIGURE_SIGNATURE}" ]]; then
+  echo "Configuration unchanged; skipping reconfigure."
+else
+  emconfigure ./configure "${CONFIGURE_ARGS[@]}"
+  echo "${CONFIGURE_SIGNATURE}" > "${CONFIGURE_STAMP}"
+fi
 
 # Use nproc (Linux) or sysctl (macOS) for parallel job count
 if command -v nproc >/dev/null 2>&1; then
