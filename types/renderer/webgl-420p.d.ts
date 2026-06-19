@@ -41,7 +41,7 @@ export declare class WebGlRender {
      *
      * @param {IYUV420PFrame} frame
      */
-    renderYuv420(frame: IYUV420PFrame): void;
+    renderYuv420(frame: IYUV420PFrame): boolean;
     destroy(): void;
 }
 export default WebGlRender;

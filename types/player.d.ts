@@ -44,6 +44,9 @@ export declare class HlsWasmPlayer {
     maxPendingSegmentInfo: number;
     maxSegmentInfoAgeMs: number;
     hevcCompatFallbackTriggered: boolean;
+    waitingForRecoveryKeyFrame: boolean;
+    rejectedVideoFrames: number;
+    lastCorruptLogAt: number;
     _totalDuration: number;
     _seekBaseTime: number;
     _currentSrc: string;

@@ -68,7 +68,7 @@
      * tightly-packed `width * height` buffer before uploading, otherwise the
      * texture would sample padding bytes and the picture would shear.
      */
-    var _WebGlRender_instances, _a, _WebGlRender_createProgram, _WebGlRender_packPlane, _WebGlRender_webglcontextlostFun, _WebGlRender_webglcontextrestoredFun, _WebGlRender_addEventListeners, _WebGlRender_removeEventListener;
+    var _WebGlRender_instances, _a, _WebGlRender_createProgram, _WebGlRender_packPlane, _WebGlRender_isValidFrame, _WebGlRender_webglcontextlostFun, _WebGlRender_webglcontextrestoredFun, _WebGlRender_addEventListeners, _WebGlRender_removeEventListener;
     class WebGlRender {
         constructor(canvas, options = {}) {
             _WebGlRender_instances.add(this);
@@ -115,11 +115,17 @@
          */
         renderYuv420(frame) {
             const { width, height, y, u, v, yStride, uStride, vStride } = frame;
+            if (!__classPrivateFieldGet(this, _WebGlRender_instances, "m", _WebGlRender_isValidFrame).call(this, frame)) {
+                return false;
+            }
             const cw = width >> 1;
             const ch = height >> 1;
             const yPacked = __classPrivateFieldGet(this, _WebGlRender_instances, "m", _WebGlRender_packPlane).call(this, y, width, height, yStride, "_yScratch");
             const uPacked = __classPrivateFieldGet(this, _WebGlRender_instances, "m", _WebGlRender_packPlane).call(this, u, cw, ch, uStride, "_uScratch");
             const vPacked = __classPrivateFieldGet(this, _WebGlRender_instances, "m", _WebGlRender_packPlane).call(this, v, cw, ch, vStride, "_vScratch");
+            if (!yPacked || !uPacked || !vPacked) {
+                return false;
+            }
             const gl = this.gl;
             gl.viewport(0, 0, this.canvas.width, this.canvas.height);
             gl.clearColor(0.0, 0.0, 0.0, 0.0);
@@ -128,6 +134,7 @@
             this.uTexture.fill(cw, ch, uPacked);
             this.vTexture.fill(cw, ch, vPacked);
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            return true;
         }
         destroy() {
             try {
@@ -183,6 +190,14 @@
         gl.useProgram(program);
         return program;
     }, _WebGlRender_packPlane = function _WebGlRender_packPlane(data, width, height, stride, scratchKey) {
+        if (stride < width || width <= 0 || height <= 0) {
+            return null;
+        }
+        const available = data.length;
+        const required = stride * height;
+        if (available < required) {
+            return null;
+        }
         if (stride === width) {
             // Already tight; upload as-is.
             return data;
@@ -197,6 +212,27 @@
             scratch.set(data.subarray(row * stride, row * stride + width), row * width);
         }
         return scratch.length === need ? scratch : scratch.subarray(0, need);
+    }, _WebGlRender_isValidFrame = function _WebGlRender_isValidFrame(frame) {
+        const { width, height, y, u, v, yStride, uStride, vStride } = frame;
+        if (!Number.isInteger(width) || !Number.isInteger(height))
+            return false;
+        if (!Number.isInteger(yStride) || !Number.isInteger(uStride) || !Number.isInteger(vStride))
+            return false;
+        if (width <= 0 || height <= 0)
+            return false;
+        if ((width & 1) !== 0 || (height & 1) !== 0)
+            return false;
+        const cw = width >> 1;
+        const ch = height >> 1;
+        if (yStride < width || uStride < cw || vStride < cw)
+            return false;
+        if (y.length < yStride * height)
+            return false;
+        if (u.length < uStride * ch)
+            return false;
+        if (v.length < vStride * ch)
+            return false;
+        return true;
     }, _WebGlRender_webglcontextlostFun = function _WebGlRender_webglcontextlostFun(e) {
         e.preventDefault(); // 阻止浏览器默认处理
         console.log("WebGL 上下文丢失，等待恢复");
@@ -1760,7 +1796,7 @@
         }
     }
 
-    var _HlsWasmPlayer_instances, _HlsWasmPlayer_maybeFallbackFromLowLatency, _HlsWasmPlayer_enqueueVideoFrame, _HlsWasmPlayer_startRenderLoop, _HlsWasmPlayer_maybeMarkEnded, _HlsWasmPlayer_startTimeUpdate, _HlsWasmPlayer_stopTimeUpdate, _HlsWasmPlayer_updatePlayingWaitingState, _HlsWasmPlayer_onVisibilityChange, _HlsWasmPlayer_openAvGate, _HlsWasmPlayer_getVideoLeadSec, _HlsWasmPlayer_normalizeVideoPts, _HlsWasmPlayer_normalizeAudioPts, _HlsWasmPlayer_logSegmentVideoInfo, _HlsWasmPlayer_logSegmentAudioInfo, _HlsWasmPlayer_flushSegmentInfo, _HlsWasmPlayer_flushHeadSegmentInfo, _HlsWasmPlayer_flushPendingSegmentInfos, _HlsWasmPlayer_compactSegmentInfoQueue, _HlsWasmPlayer_evictStaleSegmentInfos, _HlsWasmPlayer_shortSegmentName;
+    var _HlsWasmPlayer_instances, _HlsWasmPlayer_maybeFallbackFromLowLatency, _HlsWasmPlayer_enqueueVideoFrame, _HlsWasmPlayer_isValidDecodedVideoFrame, _HlsWasmPlayer_enterRecoveryMode, _HlsWasmPlayer_startRenderLoop, _HlsWasmPlayer_maybeMarkEnded, _HlsWasmPlayer_startTimeUpdate, _HlsWasmPlayer_stopTimeUpdate, _HlsWasmPlayer_updatePlayingWaitingState, _HlsWasmPlayer_onVisibilityChange, _HlsWasmPlayer_openAvGate, _HlsWasmPlayer_getVideoLeadSec, _HlsWasmPlayer_normalizeVideoPts, _HlsWasmPlayer_normalizeAudioPts, _HlsWasmPlayer_logSegmentVideoInfo, _HlsWasmPlayer_logSegmentAudioInfo, _HlsWasmPlayer_flushSegmentInfo, _HlsWasmPlayer_flushHeadSegmentInfo, _HlsWasmPlayer_flushPendingSegmentInfos, _HlsWasmPlayer_compactSegmentInfoQueue, _HlsWasmPlayer_evictStaleSegmentInfos, _HlsWasmPlayer_shortSegmentName;
     class HlsWasmPlayer {
         constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
             _HlsWasmPlayer_instances.add(this);
@@ -1793,6 +1829,9 @@
             this.maxPendingSegmentInfo = 60;
             this.maxSegmentInfoAgeMs = 30000;
             this.hevcCompatFallbackTriggered = false;
+            this.waitingForRecoveryKeyFrame = false;
+            this.rejectedVideoFrames = 0;
+            this.lastCorruptLogAt = 0;
             this._totalDuration = 0;
             this._seekBaseTime = 0;
             this._currentSrc = "";
@@ -1857,6 +1896,9 @@
             this.maxPendingSegmentInfo = 60;
             this.maxSegmentInfoAgeMs = 30000; // evict entries older than 30s
             this.hevcCompatFallbackTriggered = false;
+            this.waitingForRecoveryKeyFrame = false;
+            this.rejectedVideoFrames = 0;
+            this.lastCorruptLogAt = 0;
             this._totalDuration = 0;
             this._seekBaseTime = 0;
             // HTMLMediaElement-like state
@@ -2003,10 +2045,7 @@
                         const v = vData;
                         const normalizedPtsMs = __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_normalizeVideoPts).call(this, ptsMs);
                         const normalizedFps = Number.isFinite(fps) && fps > 0 ? fps : 0;
-                        if (normalizedFps > 0) {
-                            this.videoFrameDurMs = 1000 / normalizedFps;
-                        }
-                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enqueueVideoFrame).call(this, {
+                        const frame = {
                             width,
                             height,
                             y,
@@ -2017,7 +2056,24 @@
                             vStride,
                             ptsMs: normalizedPtsMs,
                             isKeyFrame: !!isKeyFrame,
-                        });
+                        };
+                        if (!__classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_isValidDecodedVideoFrame).call(this, frame)) {
+                            __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enterRecoveryMode).call(this, "invalid decoded video frame");
+                            return;
+                        }
+                        if (this.waitingForRecoveryKeyFrame) {
+                            if (!frame.isKeyFrame) {
+                                this.rejectedVideoFrames += 1;
+                                return;
+                            }
+                            this.waitingForRecoveryKeyFrame = false;
+                            this.videoQueue.length = 0;
+                            this.log("[compat] Recovered video decode on keyframe.");
+                        }
+                        if (normalizedFps > 0) {
+                            this.videoFrameDurMs = 1000 / normalizedFps;
+                        }
+                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enqueueVideoFrame).call(this, frame);
                         if (isKeyFrame && this.onIFrame) {
                             this.onIFrame(normalizedPtsMs);
                         }
@@ -2084,6 +2140,9 @@
             this._avGateTimer = window.setTimeout(() => __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_openAvGate).call(this), 2000);
             this._emit("loadstart", { src: url, mode: this._currentMode });
             this.hevcCompatFallbackTriggered = false;
+            this.waitingForRecoveryKeyFrame = false;
+            this.rejectedVideoFrames = 0;
+            this.lastCorruptLogAt = 0;
             this.running = true;
             this.videoQueue.length = 0;
             this.videoClockOffsetSec = null;
@@ -2101,7 +2160,7 @@
             // Listen for tab background/foreground transitions to
             // prevent massive frame-drop storms when rAF was suspended.
             document.addEventListener("visibilitychange", this._onVisibilityBound);
-            this.playlist.start(url, this._currentMode);
+            this.playlist.start(url);
             __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_startTimeUpdate).call(this);
         }
         async stop() {
@@ -2124,6 +2183,9 @@
             this.videoFrameDurMs = 33.33;
             this.lastAudioRawPtsMs = null;
             this.lastAudioNormPtsMs = null;
+            this.waitingForRecoveryKeyFrame = false;
+            this.rejectedVideoFrames = 0;
+            this.lastCorruptLogAt = 0;
             __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_flushPendingSegmentInfos).call(this);
             this.segmentInfoQueue.length = 0;
             this._lastRenderedFramePtsSec = null;
@@ -2186,6 +2248,9 @@
             this.lastAudioNormPtsMs = null;
             this.droppedVideoFrames = 0;
             this.lastDropLogAt = 0;
+            this.waitingForRecoveryKeyFrame = false;
+            this.rejectedVideoFrames = 0;
+            this.lastCorruptLogAt = 0;
             this._lastRenderedFramePtsSec = null;
             const segmentStart = await this.playlist.seek(timeSec);
             this._seekBaseTime = segmentStart;
@@ -2328,6 +2393,38 @@
             return;
         }
         this.videoQueue.push(frame);
+    }, _HlsWasmPlayer_isValidDecodedVideoFrame = function _HlsWasmPlayer_isValidDecodedVideoFrame(frame) {
+        const { width, height, y, u, v, yStride, uStride, vStride, ptsMs } = frame;
+        if (!Number.isFinite(ptsMs))
+            return false;
+        if (!Number.isInteger(width) || !Number.isInteger(height))
+            return false;
+        if (!Number.isInteger(yStride) || !Number.isInteger(uStride) || !Number.isInteger(vStride))
+            return false;
+        if (width <= 0 || height <= 0)
+            return false;
+        if ((width & 1) !== 0 || (height & 1) !== 0)
+            return false;
+        const cw = width >> 1;
+        const ch = height >> 1;
+        if (yStride < width || uStride < cw || vStride < cw)
+            return false;
+        if (y.length < yStride * height)
+            return false;
+        if (u.length < uStride * ch)
+            return false;
+        if (v.length < vStride * ch)
+            return false;
+        return true;
+    }, _HlsWasmPlayer_enterRecoveryMode = function _HlsWasmPlayer_enterRecoveryMode(reason) {
+        this.waitingForRecoveryKeyFrame = true;
+        this.videoQueue.length = 0;
+        this.rejectedVideoFrames += 1;
+        const now = performance.now();
+        if (now - this.lastCorruptLogAt > 1000) {
+            this.lastCorruptLogAt = now;
+            this.log(`[compat] Dropped corrupt video frame: ${reason}. Waiting for next keyframe.`);
+        }
     }, _HlsWasmPlayer_startRenderLoop = function _HlsWasmPlayer_startRenderLoop() {
         if (this.renderRafId) {
             cancelAnimationFrame(this.renderRafId);
@@ -2363,7 +2460,11 @@
                         droppedThisTick += 1;
                         continue;
                     }
-                    this.renderer.renderYuv420(head);
+                    const rendered = this.renderer.renderYuv420(head);
+                    if (!rendered) {
+                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enterRecoveryMode).call(this, "renderer rejected corrupted frame");
+                        continue;
+                    }
                     this._lastRenderedFramePtsSec = headPtsSec;
                     lastRenderWallSec = nowSec;
                     __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_maybeMarkEnded).call(this);
@@ -2383,7 +2484,12 @@
                     if (!head)
                         return;
                     const headPtsSec = head.ptsMs / 1000;
-                    this.renderer.renderYuv420(head);
+                    const rendered = this.renderer.renderYuv420(head);
+                    if (!rendered) {
+                        __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_enterRecoveryMode).call(this, "renderer rejected corrupted frame");
+                        this.renderRafId = requestAnimationFrame(tick);
+                        return;
+                    }
                     this._lastRenderedFramePtsSec = headPtsSec;
                     lastRenderWallSec = nowSec;
                     __classPrivateFieldGet(this, _HlsWasmPlayer_instances, "m", _HlsWasmPlayer_maybeMarkEnded).call(this);
