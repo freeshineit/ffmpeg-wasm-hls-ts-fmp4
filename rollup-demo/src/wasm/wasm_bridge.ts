@@ -24,7 +24,7 @@ export class WasmBridge {
       this.initPromiseResolver = resolve;
       this.initPromiseRejecter = reject;
 
-      this.worker = new Worker(new URL('/wasm/wasm_worker.js', window.location.href));
+      this.worker = new Worker(new URL('./wasm/wasm_worker.js', window.location.href));
 
       this.worker.onmessage = (e: MessageEvent) => {
         const { type, payload } = e.data;
