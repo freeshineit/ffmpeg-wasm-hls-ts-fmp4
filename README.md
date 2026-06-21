@@ -11,11 +11,22 @@
 - 视频输出：WebGL（YUV420P 着色显示）。
 - 音频输出：AudioContext（Float32 PCM 调度播放）。
 - 播放模式：直播、回放；支持 LL-HLS 关键标签（PART、PRELOAD-HINT）。
+- 解码运行在 Web Worker 中，避免阻塞主线程。
 
 ## 项目结构
 
-- `cpp/`：WASM 解码核心（FFmpeg demux/decode + Emscripten 导出接口）。
-- `web/`：浏览器播放器逻辑（HLS 拉取、WASM 调用、WebGL/AudioContext 输出）。
+- `cpp/`：WASM 解码核心（FFmpeg demux/decode + Emscripten 导出接口）。详见 [cpp/README.md](cpp/README.md)。
+  - `cpp/src/decoder.cpp`：解码器核心实现。
+  - `cpp/include/decoder.h`：对外 C API 声明。
+  - `cpp/build/`：构建产物（`decoder.js` / `decoder.wasm`）。
+  - `cpp/third_party/ffmpeg-wasm/`：FFmpeg WASM 静态库。
+- `rollup-demo/`：浏览器播放器示例（HLS 拉取、WASM 调用、WebGL/AudioContext 输出）。
+  - `rollup-demo/src/player.ts`：播放器主逻辑。
+  - `rollup-demo/src/hls/`：HLS / LL-HLS 播放列表解析与拉流控制。
+  - `rollup-demo/src/wasm/`：WASM 桥接与 Worker（`wasm_bridge.ts` / `wasm_worker.js`）。
+  - `rollup-demo/src/renderer/`：WebGL 渲染（`webgl-420p.ts` / `Texture.ts`）。
+  - `rollup-demo/src/audio/`：音频渲染与解码（`audio_renderer.ts` 等）。
+  - `rollup-demo/public/`：静态页面与 wasm 资源。
 
 ## 一、编译 FFmpeg 到 wasm
 
@@ -46,6 +57,8 @@ make SIMD_MODE=off ffmpeg
 ```
 
 编译后输出：`cpp/third_party/ffmpeg-wasm`
+
+> 也可以使用 Docker 构建（无需本地安装 Emscripten SDK），详见 [cpp/README.md](cpp/README.md)。
 
 ## 二、编译播放器 wasm（默认 make，不使用 CMake）
 
@@ -93,13 +106,22 @@ make install-web
 
 ## 三、运行 Web 播放器
 
+`rollup-demo/` 使用 pnpm + Rollup + TypeScript。
+
 ```bash
-cd web
-npm install
-npm run dev
+cd rollup-demo
+pnpm install
+pnpm dev
 ```
 
-打开浏览器，输入 m3u8 地址后点击“开始播放”。
+开发服务器默认监听 `http://localhost:3000`（见 [rollup-demo/rollup.config.js](rollup-demo/rollup.config.js)）。打开浏览器，输入 m3u8 地址后点击“开始播放”。
+
+构建生产产物：
+
+```bash
+cd rollup-demo
+pnpm build
+```
 
 ## 核心实现说明
 
@@ -112,13 +134,17 @@ npm run dev
 - 视频统一转 `YUV420P` 后回调 JS。
 - 音频统一转换为 `Float32` PCM 后回调 JS。
 
-导出 C 接口：
+导出 C 接口（见 [cpp/include/decoder.h](cpp/include/decoder.h)）：
+
 - `player_create`
 - `player_destroy`
 - `player_feed_segment`
 - `player_reset`
+- `player_get_current_time`
 
-### 2) HLS/LL-HLS 控制（`web/src/hls`）
+模块以 `-sMODULARIZE=1` 构建，`decoder.js` 导出异步工厂函数 `HlsPlayerModule`。底层函数以 `_player_create / _player_feed_segment / _player_reset / _player_destroy / _player_get_current_time` 形式调用。接入细节见 [cpp/README.md](cpp/README.md)。
+
+### 2) HLS/LL-HLS 控制（`rollup-demo/src/hls/`）
 
 - 解析媒体播放列表关键标签：
   - `#EXT-X-MAP`
@@ -129,15 +155,20 @@ npm run dev
 - 直播模式循环刷新列表；回放模式在 `ENDLIST` 后停止。
 - LL-HLS 场景优先拉取 PART，再拉普通 Segment。
 
-### 3) 视频渲染（`web/src/renderer/webgl_renderer.js`）
+### 3) 视频渲染（`rollup-demo/src/renderer/webgl-420p.ts`）
 
 - 3 纹理上传 Y/U/V 平面。
 - Fragment Shader 里进行 YUV->RGB 转换。
 
-### 4) 音频播放（`web/src/audio/audio_renderer.js`）
+### 4) 音频播放（`rollup-demo/src/audio/audio_renderer.ts`）
 
 - 使用 `AudioContext`。
 - 每帧 PCM 写入 `AudioBuffer`，通过 `nextPlayTime` 连续调度，降低抖动。
+
+### 5) WASM 桥接（`rollup-demo/src/wasm/`）
+
+- `wasm_worker.js` 在 Web Worker 中加载并运行 `decoder.js`，承担解码工作。
+- `wasm_bridge.ts` 负责主线程与 Worker 的消息通信，并把解码帧转交渲染/音频管线。
 
 ## 浏览器兼容建议
 
