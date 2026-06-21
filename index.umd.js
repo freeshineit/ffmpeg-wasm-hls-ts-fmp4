@@ -1797,8 +1797,19 @@
     }
 
     var _HlsWasmPlayer_instances, _HlsWasmPlayer_maybeFallbackFromLowLatency, _HlsWasmPlayer_enqueueVideoFrame, _HlsWasmPlayer_isValidDecodedVideoFrame, _HlsWasmPlayer_enterRecoveryMode, _HlsWasmPlayer_startRenderLoop, _HlsWasmPlayer_maybeMarkEnded, _HlsWasmPlayer_startTimeUpdate, _HlsWasmPlayer_stopTimeUpdate, _HlsWasmPlayer_updatePlayingWaitingState, _HlsWasmPlayer_onVisibilityChange, _HlsWasmPlayer_openAvGate, _HlsWasmPlayer_getVideoLeadSec, _HlsWasmPlayer_normalizeVideoPts, _HlsWasmPlayer_normalizeAudioPts, _HlsWasmPlayer_logSegmentVideoInfo, _HlsWasmPlayer_logSegmentAudioInfo, _HlsWasmPlayer_flushSegmentInfo, _HlsWasmPlayer_flushHeadSegmentInfo, _HlsWasmPlayer_flushPendingSegmentInfos, _HlsWasmPlayer_compactSegmentInfoQueue, _HlsWasmPlayer_evictStaleSegmentInfos, _HlsWasmPlayer_shortSegmentName;
+    /**
+     * HlsWasmPlayer: a self-contained HLS player using a WASM-based decoder.
+     */
+    const WAEM_DECODER_WASM_URL = "./wasm/decoder.wasm";
+    /**
+     * Note on the WASM decoder URL: we load the WASM JavaScript glue code as a module via dynamic import in wasm_bridge.ts, and that module creates a Web Worker using a separate JavaScript file (wasm_worker.js) which also needs to load the same WASM file. Both the main thread and the worker need to be able to resolve the WASM URL correctly, so we use relative URLs here and construct the Worker with an absolute URL (new URL(..., window.location.href)) to ensure it works regardless of the page's base URL or how it's served.
+     */
+    const WAEM_DECODER_JS_URL = "./wasm/decoder.js";
     class HlsWasmPlayer {
-        constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }) {
+        constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame } = {
+            wasmJsUrl: WAEM_DECODER_JS_URL,
+            wasmFileUrl: WAEM_DECODER_WASM_URL,
+        }) {
             _HlsWasmPlayer_instances.add(this);
             this.audioDecoder = null;
             this._hasSeparateAudioTrack = false;

@@ -286,8 +286,8 @@
   /* ============ Player ============ */
   const player = new HlsWasmPlayer({
     canvas,
-    wasmJsUrl: "/wasm/decoder.js",
-    wasmFileUrl: "/wasm/decoder.wasm",
+    wasmJsUrl: "./wasm/decoder.js",
+    wasmFileUrl: "./wasm/decoder.wasm",
     log,
   });
 

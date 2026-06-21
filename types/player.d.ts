@@ -65,7 +65,7 @@ export declare class HlsWasmPlayer {
     _waitingFired: boolean;
     _lastDurationFired: number;
     _audioTrackWarned: boolean;
-    constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }: HlsWasmPlayerOptions);
+    constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }?: HlsWasmPlayerOptions);
     addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void;
     removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void;
     dispatchEvent(event: Event): boolean;
