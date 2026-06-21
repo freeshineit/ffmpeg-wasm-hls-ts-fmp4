@@ -7,6 +7,15 @@ import { WasmBridge } from "./wasm/wasm_bridge";
 import TimeRangesLite from "./utils/TimeRangesLite";
 import type { IAudioPcmFrame, ISegmentInfo, HlsWasmPlayerOptions, IVideoFrame } from "./types";
 
+/**
+ * HlsWasmPlayer: a self-contained HLS player using a WASM-based decoder.
+ */
+const WAEM_DECODER_WASM_URL = "./wasm/decoder.wasm";
+/**
+ * Note on the WASM decoder URL: we load the WASM JavaScript glue code as a module via dynamic import in wasm_bridge.ts, and that module creates a Web Worker using a separate JavaScript file (wasm_worker.js) which also needs to load the same WASM file. Both the main thread and the worker need to be able to resolve the WASM URL correctly, so we use relative URLs here and construct the Worker with an absolute URL (new URL(..., window.location.href)) to ensure it works regardless of the page's base URL or how it's served.
+ */
+const WAEM_DECODER_JS_URL = "./wasm/decoder.js";
+
 export class HlsWasmPlayer {
   canvas!: HTMLCanvasElement;
   log!: (message: string) => void;
@@ -67,7 +76,12 @@ export class HlsWasmPlayer {
   _lastDurationFired: number = -1;
   _audioTrackWarned: boolean = false;
 
-  constructor({ canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }: HlsWasmPlayerOptions) {
+  constructor(
+    { canvas, wasmJsUrl, wasmFileUrl, log, onIFrame }: HlsWasmPlayerOptions = {
+      wasmJsUrl: WAEM_DECODER_JS_URL,
+      wasmFileUrl: WAEM_DECODER_WASM_URL,
+    } as HlsWasmPlayerOptions,
+  ) {
     this.canvas = canvas;
     this.log = log || (() => {});
     this.onIFrame = onIFrame;
