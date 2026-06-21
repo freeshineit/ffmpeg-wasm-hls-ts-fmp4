@@ -1680,7 +1680,7 @@
             return new Promise((resolve, reject) => {
                 this.initPromiseResolver = resolve;
                 this.initPromiseRejecter = reject;
-                this.worker = new Worker(new URL('/wasm/wasm_worker.js', window.location.href));
+                this.worker = new Worker(new URL('./wasm/wasm_worker.js', window.location.href));
                 this.worker.onmessage = (e) => {
                     const { type, payload } = e.data;
                     switch (type) {
